@@ -1,0 +1,27 @@
+# Secrets — never commit these
+secret.key
+firmware_key.h
+secret_key.h
+firmware/attendance_reader_PN532/secret_key.h
+firmware/attendance_reader_PN532/wifi_config.h
+software/firmware_key.h
+software/secret.key
+
+# Local WiFi credentials header (in case it lands elsewhere)
+wifi_config.h
+
+# Student / institution data — real rosters, logs, and Canvas exports
+software/roster.csv
+software/attendance.csv
+software/*_decoded.csv
+software/*_filled.csv
+software/aliases.csv
+software/Grades*.csv
+
+# Python
+__pycache__/
+*.pyc
+software/.venv/
+
+# OS cruft
+.DS_Store

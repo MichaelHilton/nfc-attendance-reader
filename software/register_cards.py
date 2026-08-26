@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""
+Card registration station — builds an ENCRYPTED roster.csv for the reader.
+
+A student taps their ID card on the USB reader, types their name, and it's saved.
+The window matches the device screen (black; green = ready, cyan = saved).
+
+Privacy: the card number is NEVER written to disk. roster.csv stores
+    token,encrypted_name
+where token = HMAC-SHA256(secret, id) and the name is AES-256 encrypted. Same
+secret.key the firmware uses (see attendance_crypto.py). Reader = USB keyboard-wedge
+(types the card number, e.g. 0984257796, + Enter).
+
+First run creates secret.key and writes secret_key.h straight into the firmware
+sketch folder (../firmware/attendance_reader_PN532/secret_key.h) — nothing to paste.
+
+Run:
+    pip install cryptography
+    python3 register_cards.py                 # roster.csv + secret.key beside this script
+    python3 register_cards.py myclass.csv     # custom roster file
+
+Esc quits, F11 toggles full screen.
+"""
+import csv, os, sys, re
+import attendance_crypto as ac
+
+# ----------------------------- roster core (testable) -----------------------------
+def normalize_key(raw: str) -> str:
+    """Whatever the reader typed -> the device's exact id format (10-digit decimal)."""
+    digits = re.sub(r"\D", "", raw or "")
+    if not digits:
+        return ""
+    return f"{int(digits) % (1 << 32):010d}"
+
+def load_roster(path: str) -> dict:
+    """Return {token: encrypted_name}. Tolerates a header row and blank lines."""
+    roster = {}
+    if not os.path.exists(path):
+        return roster
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if not row:
+                continue
+            tok = (row[0] or "").strip()
+            if len(tok) != 32:                 # token is 32 hex chars; skips header/blank
+                continue
+            roster[tok] = row[1].strip() if len(row) > 1 else ""
+    return roster
+
+def save_roster(path: str, roster: dict) -> None:
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["token", "enc"])
+        for tok in sorted(roster):
+            w.writerow([tok, roster[tok]])
+
+def upsert(path: str, token: str, enc: str):
+    """Add/replace one entry. Returns (('added'|'updated', prev_enc|None), count)."""
+    roster = load_roster(path)
+    prev = roster.get(token)
+    roster[token] = enc
+    save_roster(path, roster)
+    return (("updated", prev) if prev is not None else ("added", None)), len(roster)
+
+# ----------------------------------- GUI ------------------------------------------
+def run_gui(path: str, key_path: str):
+    import tkinter as tk
+
+    fresh = not os.path.exists(key_path)
+    K = ac.load_or_create_key(key_path)
+    if fresh:
+        fw_dir = os.path.join(os.path.dirname(key_path) or ".", "..",
+                               "firmware", "attendance_reader_PN532")
+        fw_key_path = os.path.join(fw_dir, "secret_key.h")
+        if os.path.isdir(fw_dir):
+            open(fw_key_path, "w").write(ac.firmware_key_snippet(K))
+            print("\n*** A NEW secret key was created:", key_path)
+            print("*** Wrote", fw_key_path, "- re-flash the sketch so the device picks it up.")
+        else:
+            print("\n*** A NEW secret key was created:", key_path)
+            print("*** Run attendance_crypto.py to (re)write secret_key.h into the firmware folder.")
+        print("*** Keep secret.key PRIVATE — never commit it or put it on the SD card.\n")
+
+    BG, GREEN, CYAN, ORANGE, WHITE, GREY = "#000000","#28e04b","#25d7e0","#ff9a1f","#f2f2f2","#7d7d7d"
+    root = tk.Tk(); root.title("Card Registration"); root.configure(bg=BG); root.geometry("900x560")
+    try: root.attributes("-fullscreen", True)
+    except tk.TclError: pass
+
+    state = {"mode": "tap", "token": "", "reset_job": None}
+    count = len(load_roster(path))
+
+    big   = tk.Label(root, bg=BG, fg=GREEN, font=("Helvetica", 60, "bold"), wraplength=840, justify="center")
+    small = tk.Label(root, bg=BG, fg=WHITE, font=("Helvetica", 26))
+    entry = tk.Entry(root, bg="#111111", fg=WHITE, insertbackground=WHITE, font=("Helvetica", 40),
+                     justify="center", relief="flat", highlightthickness=2,
+                     highlightbackground=GREY, highlightcolor=CYAN)
+    footer = tk.Label(root, bg=BG, fg=GREY, font=("Helvetica", 15))
+    big.place(relx=0.5, rely=0.38, anchor="center")
+    small.place(relx=0.5, rely=0.56, anchor="center")
+    footer.place(relx=0.5, rely=0.95, anchor="center")
+
+    def set_footer():
+        footer.config(text=f"{count} registered   ·   {os.path.basename(path)}   ·   encrypted   ·   Esc to quit")
+
+    def show(mode):
+        state["mode"] = mode
+        if state["reset_job"]:
+            root.after_cancel(state["reset_job"]); state["reset_job"] = None
+        if mode == "tap":
+            state["token"] = ""
+            big.config(text="Tap your card", fg=GREEN); small.config(text="hold it on the reader")
+            entry.delete(0, tk.END); entry.place(relx=0.5, rely=1.5); entry.focus_set()   # off-screen capture
+        elif mode == "name":
+            big.config(text="Type your name", fg=CYAN); small.config(text="then press Enter")
+            entry.delete(0, tk.END); entry.place(relx=0.5, rely=0.70, anchor="center", relwidth=0.6); entry.focus_set()
+        set_footer()
+
+    def flash(msg, sub, color, ms=1800):
+        big.config(text=msg, fg=color); small.config(text=sub)
+        entry.place(relx=0.5, rely=1.5); state["mode"] = "flash"
+        state["reset_job"] = root.after(ms, lambda: show("tap"))
+
+    def on_return(_evt=None):
+        raw = entry.get()
+        if state["mode"] == "tap":
+            cid = normalize_key(raw)
+            if not cid or cid == "0000000000":
+                flash("Read again", "card not recognized", ORANGE); return
+            state["token"] = ac.token(K, cid)     # store the token, not the number
+            existing = load_roster(path).get(state["token"])
+            if existing is not None:
+                try:
+                    name = ac.decrypt_name(K, existing)
+                except Exception:
+                    name = ""
+                flash("Registration complete", name or "card already registered", CYAN)
+                return
+            show("name")
+        elif state["mode"] == "name":
+            name = raw.strip()[:39]        # device name buffer is 39 chars
+            if not name:
+                small.config(text="please type your name, then Enter"); return
+            enc = ac.encrypt_name(K, name)
+            (action, prev), total = upsert(path, state["token"], enc)
+            nonlocal count; count = total
+            if action == "updated" and prev:
+                try: pn = ac.decrypt_name(K, prev)
+                except Exception: pn = ""
+                if pn and pn != name:
+                    flash("Updated", f"{pn}  →  {name}", CYAN); return
+            flash("Saved", name, CYAN)
+
+    root.bind("<Return>", on_return); root.bind("<KP_Enter>", on_return)
+    root.bind("<Escape>", lambda e: root.destroy())
+    root.bind("<F11>", lambda e: root.attributes("-fullscreen", not root.attributes("-fullscreen")))
+    show("tap"); root.mainloop()
+
+
+if __name__ == "__main__":
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "roster.csv")
+    run_gui(path, os.path.join(here, "secret.key"))

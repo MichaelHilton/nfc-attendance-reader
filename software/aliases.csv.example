@@ -1,0 +1,7 @@
+# aliases.csv.example — copy to aliases.csv and fill in real fixups.
+# aliases.csv itself is gitignored (it can contain real student data).
+#
+# One row per student whose typed name doesn't auto-match the Canvas export
+# (nicknames, middle initials, etc.). build_gradebook.py checks this first.
+typed_name,sis_login_id
+Mike Smith,msmith2@example.edu
