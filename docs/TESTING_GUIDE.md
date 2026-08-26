@@ -168,7 +168,9 @@ Close the Arduino **Serial Monitor first** (only one program can hold the port).
 ## Step 6 — Build the Canvas gradebook
 
 You need a **Canvas gradebook export CSV** (Canvas → Grades → Export) with the
-attendance assignment column already created.
+attendance assignment column already created. No real course handy? Copy
+`software/Grades.csv.example` to `Grades.csv` and try the command below as-is —
+it's a fake 3-student roster shaped exactly like a real Canvas export.
 
 ```bash
 cd software
