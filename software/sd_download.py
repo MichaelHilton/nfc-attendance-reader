@@ -19,7 +19,7 @@ import sys, time, argparse
 try:
     import serial
     import serial.tools.list_ports
-except ImportError:
+except ImportError:  # pragma: no cover
     sys.exit("pyserial is not installed.  Run:  pip install pyserial")
 
 
@@ -32,7 +32,44 @@ def find_port():
     return None
 
 
-def main():
+# ---------------------- pure parsers (no serial I/O) ----------------------
+def parse_dump(lines):
+    """Collect the lines the device prints between its <<<BEGIN and <<<END markers."""
+    out, capturing = [], False
+    for line in lines:
+        if line.startswith("<<<BEGIN"):
+            capturing = True
+            continue
+        if line.startswith("<<<END"):
+            break
+        if capturing:
+            out.append(line)
+    return out
+
+
+def parse_count(lines):
+    """Pull N out of the device's 'attendance rows: N' reply, or None."""
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("attendance rows:"):
+            try:
+                return int(line.split(":", 1)[1])
+            except ValueError:
+                return None
+    return None
+
+
+def _serial_lines(ser, timeout_s):  # pragma: no cover  (hardware I/O)
+    """Yield decoded, newline-stripped lines from `ser` until `timeout_s` elapses."""
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        raw = ser.readline()
+        if not raw:
+            continue
+        yield raw.decode("utf-8", "replace").rstrip("\r\n")
+
+
+def main():  # pragma: no cover  (opens a real serial port)
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", help="serial port (auto-detected if omitted)")
     ap.add_argument("--cmd", default="dump", help="dump | roster | count")
@@ -51,26 +88,14 @@ def main():
     ser.reset_input_buffer()
     ser.write((a.cmd + "\n").encode())
 
-    if a.cmd == "count":           # count just prints a line back
-        t0 = time.time()
-        while time.time() - t0 < 6:
-            line = ser.readline().decode("utf-8", "replace").strip()
-            if line.startswith("attendance rows:"):
-                print(line); break
-        ser.close(); return
+    if a.cmd == "count":
+        n = parse_count(_serial_lines(ser, 6))
+        ser.close()
+        if n is not None:
+            print(f"attendance rows: {n}")
+        return
 
-    lines, capturing, t0 = [], False, time.time()
-    while time.time() - t0 < 20:
-        raw = ser.readline()
-        if not raw:
-            continue
-        line = raw.decode("utf-8", "replace").rstrip("\r\n")
-        if line.startswith("<<<BEGIN"):
-            capturing = True; continue
-        if line.startswith("<<<END"):
-            break
-        if capturing:
-            lines.append(line)
+    lines = parse_dump(_serial_lines(ser, 20))
     ser.close()
 
     if not lines:

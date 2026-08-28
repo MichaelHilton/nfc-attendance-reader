@@ -1,0 +1,17 @@
+# Coverage scope: the laptop-side logic in software/. GUI, CLI entrypoints, and
+# serial I/O are intentionally out of the automated-test scope (see
+# docs/TESTING_PLAN.md section 7).
+[run]
+source = software
+omit =
+    software/reader_test.py
+
+[report]
+# The laptop-side logic (software/) is expected to stay near-fully covered.
+# GUI, CLI entrypoints and serial I/O are excluded above / via `# pragma: no cover`.
+fail_under = 95
+exclude_also =
+    if __name__ == .__main__.:
+    def run_gui
+    raise NotImplementedError
+show_missing = true

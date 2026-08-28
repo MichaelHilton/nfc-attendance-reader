@@ -1,0 +1,5 @@
+# Test/dev dependencies. Installs the runtime deps too.
+#   pip install -r requirements-dev.txt
+-r software/requirements.txt
+pytest>=8.0
+pytest-cov>=5.0

@@ -67,6 +67,8 @@ Names that don't match Canvas are reported; pin them once in `aliases.csv`
   dumping the ESP32 flash (that would need flash-encryption + secure-boot).
 
 ## Documentation
+- `TESTING.md` — how to run the automated test suite (`pytest`) and what each
+  test protects; `docs/TESTING_PLAN.md` is the strategy behind it.
 - `docs/TESTING_GUIDE.md` — step-by-step walkthrough, key → firmware → register →
   tap → download → gradebook, plus upload troubleshooting.
 - `docs/DESIGN_NOTES.md` — why it's built this way: hardware choices, the card-ID

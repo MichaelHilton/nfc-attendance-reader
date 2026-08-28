@@ -20,10 +20,21 @@ the kind of contribution that's useful.
   WiFi credentials -- check `.gitignore` covers anything new you add that could
   contain them.
 - If you change the crypto (`software/attendance_crypto.py` or the firmware's
-  mbedTLS calls), keep both sides byte-for-byte compatible -- the boot
-  self-test (`crypto self-test: HMAC OK, AES OK`) is what proves that.
-- Run the relevant Python script against the `.example` fixtures to confirm it
-  still works from a clean clone.
+  mbedTLS calls in `crypto.hpp`), keep both sides byte-for-byte compatible --
+  update `tests/fixtures/crypto_vectors.json` and the firmware self-test
+  literals together; `tests/test_crypto_contract.py` fails if they drift.
+- Run the test suite:
+
+  ```bash
+  python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+  .venv/bin/pytest
+  ```
+
+  CI runs the same on Python 3.11–3.14. `TESTING.md` explains how to run subsets
+  and what each test file protects; `docs/TESTING_PLAN.md` is the strategy behind
+  it.
+- For changes without test coverage yet, also run the relevant Python script
+  against the `.example` fixtures to confirm it still works from a clean clone.
 
 ## Reporting security issues
 

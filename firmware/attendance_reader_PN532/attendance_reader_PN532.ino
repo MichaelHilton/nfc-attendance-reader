@@ -25,6 +25,8 @@
 #include <TFT_eSPI.h>
 #include "mbedtls/md.h"
 #include "mbedtls/aes.h"
+#include "crypto.hpp"   // uidToKey / deriveKeysFrom / computeToken / decryptNameWith
+                        // (shared byte-for-byte with software/attendance_crypto.py)
 
 // ------------------------------ USER SETTINGS -------------------------------
 // WiFi credentials live in wifi_config.h (kept out of version control via
@@ -94,64 +96,13 @@ int cmpEntry(const void* a, const void* b) {
   return strcmp(((const Entry*)a)->token, ((const Entry*)b)->token);
 }
 
-// Card key = first 4 UID bytes, little-endian, as a zero-padded 10-digit decimal.
-// This matches the USB keyboard-wedge registration reader exactly (e.g. 0984257796),
-// so IDs captured at the laptop line up with IDs read here.
-void uidToKey(uint8_t* uid, uint8_t len, char* out) {   // out must hold >=11
-  uint32_t v = 0;
-  for (uint8_t i = 0; i < 4 && i < len; i++) v |= (uint32_t)uid[i] << (8 * i);
-  sprintf(out, "%010lu", (unsigned long)v);
-}
-
 // ------------------------------- crypto -------------------------------------
-static void sha256(const uint8_t* in, size_t n, uint8_t out[32]) {
-  mbedtls_md(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), in, n, out);
-}
-static void hmac256(const uint8_t* key, size_t klen, const uint8_t* in, size_t n, uint8_t out[32]) {
-  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, klen, in, n, out);
-}
-static void toHex(const uint8_t* b, int n, char* out) {          // lowercase; out >= 2n+1
-  static const char* H = "0123456789abcdef";
-  for (int i = 0; i < n; i++) { out[2*i] = H[b[i] >> 4]; out[2*i+1] = H[b[i] & 0xf]; }
-  out[2*n] = 0;
-}
-static int hexToBytes(const char* h, uint8_t* out, int maxb) {
-  int n = strlen(h) / 2; if (n > maxb) return -1;
-  for (int i = 0; i < n; i++) { unsigned v; sscanf(h + 2*i, "%2x", &v); out[i] = (uint8_t)v; }
-  return n;
-}
-static void deriveKeysFrom(const uint8_t* K, uint8_t km[32], uint8_t ke[32]) {
-  uint8_t buf[36];
-  memcpy(buf, "MAC|", 4); memcpy(buf + 4, K, 32); sha256(buf, 36, km);
-  memcpy(buf, "ENC|", 4); memcpy(buf + 4, K, 32); sha256(buf, 36, ke);
-}
+// The primitives (uidToKey / sha256 / hmac256 / toHex / hexToBytes /
+// deriveKeysFrom / computeToken / decryptNameWith) live in crypto.hpp so the
+// host test suite can link and check them. The two thin wrappers below bind
+// them to this sketch's globals (SECRET_KEY, KMAC, KENC).
 void deriveKeys() { deriveKeysFrom(SECRET_KEY, KMAC, KENC); }
 
-// token = HMAC-SHA256(KMAC, id)[:16] as 32 lowercase hex chars
-void computeToken(const char* id, char* out33) {
-  uint8_t mac[32]; hmac256(KMAC, 32, (const uint8_t*)id, strlen(id), mac);
-  toHex(mac, 16, out33);
-}
-// decrypt hex(iv[16] + ciphertext) with a given AES-256 key, strip PKCS7 -> out
-bool decryptNameWith(const uint8_t* ke, const char* encHex, char* out, size_t outsz) {
-  int blen = strlen(encHex) / 2;
-  if (blen < 32 || (blen % 16) != 0 || blen > 160) return false;
-  uint8_t raw[160]; if (hexToBytes(encHex, raw, sizeof(raw)) != blen) return false;
-  uint8_t iv[16]; memcpy(iv, raw, 16);
-  int ctlen = blen - 16;
-  uint8_t pt[144];
-  mbedtls_aes_context a; mbedtls_aes_init(&a);
-  if (mbedtls_aes_setkey_dec(&a, ke, 256) != 0) { mbedtls_aes_free(&a); return false; }
-  int rc = mbedtls_aes_crypt_cbc(&a, MBEDTLS_AES_DECRYPT, ctlen, iv, raw + 16, pt);
-  mbedtls_aes_free(&a);
-  if (rc != 0) return false;
-  int pad = pt[ctlen - 1];
-  if (pad < 1 || pad > 16 || pad > ctlen) return false;
-  int nlen = ctlen - pad;
-  if ((size_t)nlen >= outsz) nlen = outsz - 1;
-  memcpy(out, pt, nlen); out[nlen] = 0;
-  return true;
-}
 bool decryptName(const char* encHex, char* out, size_t outsz) {
   return decryptNameWith(KENC, encHex, out, outsz);
 }
@@ -328,7 +279,7 @@ void loop() {
     strncpy(lastUid, id, 15);  lastUid[14] = 0;
     lastTagTime = now;
 
-    char token[33]; computeToken(id, token);  // keyed one-way token
+    char token[33]; computeToken(KMAC, id, token);  // keyed one-way token
     const Entry* e = lookupToken(token);
     char name[40];
     bool known = (e != NULL) && decryptName(e->enc, name, sizeof(name));

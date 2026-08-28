@@ -1,0 +1,32 @@
+{
+  "_comment": "Known-answer vectors for the attendance crypto. The two rows marked firmware_selftest MUST match the literals hard-coded in firmware/attendance_reader_PN532/attendance_reader_PN532.ino (cryptoSelfTest). tests/test_crypto_contract.py enforces that. Regenerate the non-firmware rows with: .venv/bin/python -m tests.tools.gen_vectors (or by hand from attendance_crypto).",
+  "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "subkeys": {
+    "kmac_hex": "012bf62ce3b1265b8abaee4b6c2bfe66697b2c4ead7e24c206971f6429d38843",
+    "kenc_hex": "5c1bb627a69893b2d6ecd09d27e97532a175f716a6329a7639d4fc98673f3ff4"
+  },
+  "tokens": [
+    {
+      "id": "0984257796",
+      "token": "f989b34da0e80527fc371aabb3ac7402",
+      "firmware_selftest": true
+    },
+    {
+      "id": "0000000001",
+      "token": "9419706e80ff1c77f2e982a0096af4a4",
+      "firmware_selftest": false
+    },
+    {
+      "id": "4294967295",
+      "token": "48c06c24cf02d27570260cf94d07d332",
+      "firmware_selftest": false
+    }
+  ],
+  "decrypt": [
+    {
+      "enc_hex": "000102030405060708090a0b0c0d0e0fbc2085cdcb6691b378e61607857a54e4",
+      "plaintext": "Michael Hilton",
+      "firmware_selftest": true
+    }
+  ]
+}
