@@ -1,0 +1,14 @@
+# Minimal project config — used only to configure pytest. The software/ scripts
+# are run directly (python3 software/foo.py), not installed as a package.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Put software/ on sys.path so tests can `import attendance_crypto` etc. without
+# packaging the scripts.
+pythonpath = ["software"]
+markers = [
+    "hardware: needs a physical reader/serial port (skipped in CI)",
+    "slow: takes more than a second or two",
+    "needs_trimesh: needs trimesh/manifold3d/shapely (case_gen.py deps)",
+    "needs_mbedtls: needs a C++ compiler + libmbedcrypto for the native crypto test",
+]

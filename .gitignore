@@ -21,7 +21,12 @@ software/Grades*.csv
 # Python
 __pycache__/
 *.pyc
+.venv/
 software/.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+tests/native/_vectors_gen.h
 
 # OS cruft
 .DS_Store

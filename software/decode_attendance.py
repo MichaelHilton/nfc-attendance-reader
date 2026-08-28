@@ -74,33 +74,53 @@ def read_attendance(path):
         yield (r[0].strip(), tok)
 
 
-def main():
+def decode(attendance_path, roster_path, K):
+    """(rows_out, unknown_count, registered_count).
+
+    rows_out is [[raw_time, name], ...]; tokens absent from the roster render as
+    'UNKNOWN <token[:8]>'.
+    """
+    names = token_to_name(K, roster_path)
+    rows_out, unknown = [], 0
+    for t, tok in read_attendance(attendance_path):
+        name = names.get(tok)
+        if name is None:
+            name = f"UNKNOWN {tok[:8]}"
+            unknown += 1
+        rows_out.append([t, name])
+    return rows_out, unknown, len(names)
+
+
+def write_report(path, rows_out):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["raw_time", "name"])
+        w.writerows(rows_out)
+
+
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("attendance", nargs="?", default="attendance.csv")
     ap.add_argument("roster", nargs="?", default="roster.csv")
     ap.add_argument("--key", default="secret.key")
     ap.add_argument("--out", default="attendance_decoded.csv")
-    a = ap.parse_args()
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    a = parse_args(argv)
 
     if not os.path.exists(a.key):
         sys.exit(f"Missing {a.key} — this must be the SAME key used to build the roster.")
     if not os.path.exists(a.attendance):
         sys.exit(f"Missing {a.attendance}")
     K = ac.load_or_create_key(a.key)
-    names = token_to_name(K, a.roster)
 
-    rows_out, unknown = [], 0
-    for t, tok in read_attendance(a.attendance):
-        name = names.get(tok)
-        if name is None:
-            name = f"UNKNOWN {tok[:8]}"; unknown += 1
-        rows_out.append([t, name])
-
-    with open(a.out, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f); w.writerow(["raw_time", "name"]); w.writerows(rows_out)
+    rows_out, unknown, registered = decode(a.attendance, a.roster, K)
+    write_report(a.out, rows_out)
 
     print(f"Decoded {len(rows_out)} scans ({unknown} unknown) -> {a.out}")
-    print(f"Roster had {len(names)} registered students.")
+    print(f"Roster had {registered} registered students.")
 
 
 if __name__ == "__main__":

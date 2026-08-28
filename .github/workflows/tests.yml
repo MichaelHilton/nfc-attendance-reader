@@ -1,0 +1,61 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install mbedTLS (for the native firmware crypto test)
+        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -q -rs --cov --cov-report=term-missing
+
+  # Geometry regression for case/case_gen.py. Separate job: the trimesh/manifold3d
+  # stack is heavy and irrelevant to the other 4 Python versions.
+  case-geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest -r case/requirements.txt
+      - name: Run case geometry tests
+        run: pytest -q tests/test_case_gen.py
+
+  # Optional: compile the ESP32 sketch to catch syntax/API breakage. Not on the
+  # critical path (board package download is slow); allowed to fail for now.
+  arduino-compile:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install ESP32 core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+      - name: Install libraries
+        run: arduino-cli lib install "Adafruit PN532" "TFT_eSPI"
+      - name: Compile
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 firmware/attendance_reader_PN532

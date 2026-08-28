@@ -1,0 +1,4 @@
+# Runtime dependencies for the laptop-side scripts in software/.
+#   pip install -r software/requirements.txt
+cryptography>=42.0
+pyserial>=3.5

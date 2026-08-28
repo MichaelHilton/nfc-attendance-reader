@@ -27,9 +27,16 @@ Example:
   python3 build_gradebook.py --canvas Grades.csv --attendance att.csv \
       --date 2026-08-25 --start 10:00 --late-after 10 --close 30 \
       --late-frac 0.5 --column "Aug 25 Activity"
+
+Structure: parse_args() -> build() -> Result; render_report() + write_output().
+build() does all the file reading and the matching/scoring; it raises SystemExit
+on bad input (missing files, unusable Canvas CSV, unresolvable --column) exactly
+as the script always has. main() is the thin CLI wrapper.
 """
 import csv, os, re, sys, argparse
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime
+
 import attendance_crypto as ac
 
 
@@ -78,8 +85,258 @@ def load_aliases(path):
     return m
 
 
-# ------------------------------- main ---------------------------------------
-def main():
+# --------------------------- Canvas CSV parsing ---------------------------
+@dataclass
+class CanvasIndex:
+    """A parsed Canvas export: the raw rows plus the lookups build() needs."""
+    header: list
+    points_row: list
+    rows: list                       # every row of the CSV, mutated in place on fill
+    c_student: int
+    c_login: int
+    student_rows: list               # row indices that look like enrolled students
+    by_login: dict                   # sis_login_lower -> row index
+    by_norm: dict                    # norm_tokens(student name) -> [row indices]
+
+
+def parse_canvas(path):
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    if len(rows) < 3:
+        sys.exit("Canvas CSV looks empty.")
+    return rows
+
+
+def _canvas_col_index(header, name):
+    for i, h in enumerate(header):
+        if h.strip().lower() == name.lower():
+            return i
+    sys.exit(f"Canvas CSV has no '{name}' column.")
+
+
+def build_index(rows):
+    header, points_row = rows[0], rows[1]
+    c_student = _canvas_col_index(header, "Student")
+    c_login = _canvas_col_index(header, "SIS Login ID")
+
+    # student rows = rows with an email in SIS Login ID
+    student_rows = [i for i in range(2, len(rows))
+                    if len(rows[i]) > c_login and "@" in rows[i][c_login]]
+    by_login, by_norm = {}, {}
+    for i in student_rows:
+        by_login[rows[i][c_login].strip().lower()] = i
+        by_norm.setdefault(norm_tokens(rows[i][c_student]), []).append(i)
+    return CanvasIndex(header, points_row, rows, c_student, c_login,
+                       student_rows, by_login, by_norm)
+
+
+def resolve_column(index, column):
+    """Return the target column index for --column, or SystemExit if it can't."""
+    want = column.strip().lower()
+    matches = [i for i, h in enumerate(index.header) if col_label(h) == want]
+    if not matches:
+        matches = [i for i, h in enumerate(index.header) if want in col_label(h)]
+    if len(matches) == 0:
+        sys.exit(f"No assignment column matches '{column}'.")
+    if len(matches) > 1:
+        opts = ", ".join(index.header[i] for i in matches)
+        sys.exit(f"'{column}' is ambiguous; matches: {opts}")
+    return matches[0]
+
+
+def points_for_column(index, c_target):
+    """(full_points, warning_or_None) from the Points Possible row."""
+    try:
+        return float(index.points_row[c_target]), None
+    except (ValueError, IndexError):
+        full = 1.0
+        return full, (f"! Could not read Points Possible for "
+                      f"'{index.header[c_target]}'; assuming {full}")
+
+
+# ---------------------------- attendance log ----------------------------
+def read_earliest_taps(path, date):
+    """{token: earliest datetime on `date`}, count of 'unsynced' rows."""
+    earliest, unsynced = {}, 0
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if not row or len(row) < 2:
+                continue
+            ts, tok = row[0].strip(), row[1].strip()
+            if len(tok) != 32:
+                continue                      # header/blank
+            if not ts.startswith(date):
+                if ts.startswith("unsynced"):
+                    unsynced += 1
+                continue
+            try:
+                dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if tok not in earliest or dt < earliest[tok]:
+                earliest[tok] = dt
+    return earliest, unsynced
+
+
+# ------------------------------- matching ------------------------------
+def match_row(index, name, aliases):
+    """Map a tapped name to a Canvas row index.
+
+    Returns (row_index, how) where how is one of
+    'alias' | 'exact' | 'approx', or (None, how) with how in 'ambiguous' | 'none'.
+    """
+    toks = norm_tokens(name)
+    if toks in aliases and aliases[toks] in index.by_login:
+        return index.by_login[aliases[toks]], "alias"
+    if toks in index.by_norm and len(index.by_norm[toks]) == 1:
+        return index.by_norm[toks][0], "exact"
+    if toks in index.by_norm:
+        return None, "ambiguous"
+    cand = [i for i in index.student_rows
+            if set(toks) and (set(toks) <= set(norm_tokens(index.rows[i][index.c_student]))
+                              or set(norm_tokens(index.rows[i][index.c_student])) <= set(toks))]
+    if len(cand) == 1:
+        return cand[0], "approx"
+    return None, ("ambiguous" if cand else "none")
+
+
+_RANK = {"present": 3, "late": 2, "absent": 1}
+
+
+def score_tap(minutes_late, session, full_pts, late_pts):
+    """(status, value) for a tap `minutes_late` minutes after class start."""
+    if minutes_late <= session.late_after:
+        return "present", full_pts
+    if minutes_late <= session.close:
+        return "late", late_pts
+    return "absent", 0.0                       # arrived after attendance closed
+
+
+# ------------------------------- session / result -------------------------
+@dataclass
+class Session:
+    date: str
+    start: str
+    late_after: float
+    close: float
+    late_frac: float
+    column: str
+
+
+@dataclass
+class Result:
+    rows: list                 # full Canvas rows, target column filled
+    target_header: str
+    full_pts: float
+    late_pts: float
+    present: int
+    late: int
+    absent: int
+    enrolled: int
+    unsynced: int
+    aliases_path: str
+    unmatched: list = field(default_factory=list)
+    ambiguous: list = field(default_factory=list)
+    unregistered: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+
+
+# --------------------------------- build --------------------------------
+def build(canvas_path, attendance_path, roster_path, aliases_path, K, session):
+    """Do everything except argument parsing and printing. Raises SystemExit on
+    bad input, exactly as the script always has."""
+    try:
+        start_dt = datetime.strptime(f"{session.date} {session.start}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        sys.exit("Bad --date/--start (want YYYY-MM-DD and HH:MM)")
+
+    token_name = load_token_names(K, roster_path)
+    aliases = load_aliases(aliases_path)
+
+    index = build_index(parse_canvas(canvas_path))
+    c_target = resolve_column(index, session.column)
+    full_pts, warning = points_for_column(index, c_target)
+    late_pts = round(full_pts * session.late_frac, 4)
+
+    earliest, unsynced = read_earliest_taps(attendance_path, session.date)
+
+    row_status = {}          # canvas row idx -> ("present"|"late"|"absent", value)
+    unregistered, unmatched, ambiguous = [], [], []
+    for tok, dt in earliest.items():
+        name = token_name.get(tok)
+        if name is None:
+            unregistered.append(tok[:8]); continue
+        idx, how = match_row(index, name, aliases)
+        if idx is None:
+            (ambiguous if how == "ambiguous" else unmatched).append(name); continue
+        mins = (dt - start_dt).total_seconds() / 60.0
+        st, val = score_tap(mins, session, full_pts, late_pts)
+        prev = row_status.get(idx)
+        # if multiple cards map to one student, keep the best (earliest/highest) status
+        if prev is None or _RANK[st] > _RANK[prev[0]]:
+            row_status[idx] = (st, val)
+
+    # ---- fill the column: every student gets a value; absent = 0 ----
+    present = late = absent = 0
+    for i in index.student_rows:
+        st, val = row_status.get(i, ("absent", 0.0))
+        while len(index.rows[i]) <= c_target:
+            index.rows[i].append("")
+        index.rows[i][c_target] = fmt_points(val)
+        present += st == "present"; late += st == "late"; absent += st == "absent"
+
+    return Result(
+        rows=index.rows,
+        target_header=index.header[c_target],
+        full_pts=full_pts,
+        late_pts=late_pts,
+        present=present, late=late, absent=absent,
+        enrolled=len(index.student_rows),
+        unsynced=unsynced,
+        aliases_path=aliases_path,
+        unmatched=unmatched, ambiguous=ambiguous, unregistered=unregistered,
+        warnings=[warning] if warning else [],
+    )
+
+
+# ------------------------------ output ---------------------------------
+def default_out_path(canvas_path):
+    return os.path.splitext(canvas_path)[0] + "_filled.csv"
+
+
+def write_output(path, rows):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(rows)
+
+
+def render_report(result, session, out_path):
+    r, s = result, session
+    lines = [
+        f"\nSession {s.date} {s.start}  (on-time <= {s.late_after:g} min, "
+        f"late <= {s.close:g} min @ {s.late_frac:g}x)",
+        f"Column : {r.target_header}   (present={fmt_points(r.full_pts)}, "
+        f"late={fmt_points(r.late_pts)}, absent=0)",
+        f"Result : {r.present} present, {r.late} late, {r.absent} absent "
+        f"(of {r.enrolled} enrolled)",
+    ]
+    if r.unsynced:
+        lines.append(f"! {r.unsynced} tap(s) had no NTP time (logged 'unsynced') and were skipped.")
+    if r.unmatched:
+        lines.append(f"! {len(r.unmatched)} tapped name(s) not found in Canvas -> add to {r.aliases_path}:")
+        for n in sorted(set(r.unmatched)):
+            lines.append(f"    \"{n}\",<their-sis-login-id@your-school.edu>")
+    if r.ambiguous:
+        lines.append(f"! {len(r.ambiguous)} tapped name(s) matched more than one student "
+                     f"(fix via {r.aliases_path}): " + ", ".join(sorted(set(r.ambiguous))))
+    if r.unregistered:
+        lines.append(f"! {len(r.unregistered)} tap(s) from cards not in the roster (unregistered): "
+                     + ", ".join(r.unregistered))
+    lines.append(f"\nWrote {out_path}  (import into Canvas; only '{r.target_header}' was changed)")
+    return "\n".join(lines)
+
+
+# --------------------------------- main ---------------------------------
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--canvas", required=True)
     ap.add_argument("--attendance", default="attendance.csv")
@@ -93,151 +350,25 @@ def main():
     ap.add_argument("--late-frac", type=float, default=0.5)
     ap.add_argument("--column", required=True)
     ap.add_argument("--out")
-    a = ap.parse_args()
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    a = parse_args(argv)
 
     for p in (a.key, a.canvas, a.attendance):
         if not os.path.exists(p):
             sys.exit(f"Missing {p}")
     K = ac.load_or_create_key(a.key)
-    try:
-        start_dt = datetime.strptime(f"{a.date} {a.start}", "%Y-%m-%d %H:%M")
-    except ValueError:
-        sys.exit("Bad --date/--start (want YYYY-MM-DD and HH:MM)")
+    session = Session(a.date, a.start, a.late_after, a.close, a.late_frac, a.column)
 
-    token_name = load_token_names(K, a.roster)
-    aliases = load_aliases(a.aliases)
+    result = build(a.canvas, a.attendance, a.roster, a.aliases, K, session)
+    for w in result.warnings:
+        print(w)
 
-    # ---- parse the Canvas CSV ----
-    with open(a.canvas, newline="", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
-    if len(rows) < 3:
-        sys.exit("Canvas CSV looks empty.")
-    header, points_row = rows[0], rows[1]
-
-    def col_index(name):
-        for i, h in enumerate(header):
-            if h.strip().lower() == name.lower():
-                return i
-        sys.exit(f"Canvas CSV has no '{name}' column.")
-    c_student, c_login = col_index("Student"), col_index("SIS Login ID")
-
-    want = a.column.strip().lower()
-    matches = [i for i, h in enumerate(header) if col_label(h) == want]
-    if not matches:
-        matches = [i for i, h in enumerate(header) if want in col_label(h)]
-    if len(matches) == 0:
-        sys.exit(f"No assignment column matches '{a.column}'.")
-    if len(matches) > 1:
-        opts = ", ".join(header[i] for i in matches)
-        sys.exit(f"'{a.column}' is ambiguous; matches: {opts}")
-    c_target = matches[0]
-
-    try:
-        full_pts = float(points_row[c_target])
-    except (ValueError, IndexError):
-        full_pts = 1.0
-        print(f"! Could not read Points Possible for '{header[c_target]}'; assuming {full_pts}")
-    late_pts = round(full_pts * a.late_frac, 4)
-
-    # student rows = rows with an email in SIS Login ID
-    student_rows = [i for i in range(2, len(rows))
-                    if len(rows[i]) > c_login and "@" in rows[i][c_login]]
-    by_login, by_norm = {}, {}
-    for i in student_rows:
-        by_login[rows[i][c_login].strip().lower()] = i
-        by_norm.setdefault(norm_tokens(rows[i][c_student]), []).append(i)
-
-    # ---- read attendance for the session date; earliest tap per token ----
-    earliest, unsynced = {}, 0
-    with open(a.attendance, newline="", encoding="utf-8") as f:
-        for row in csv.reader(f):
-            if not row or len(row) < 2:
-                continue
-            ts, tok = row[0].strip(), row[1].strip()
-            if len(tok) != 32:
-                continue                      # header/blank
-            if not ts.startswith(a.date):
-                if ts.startswith("unsynced"):
-                    unsynced += 1
-                continue
-            try:
-                dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                continue
-            if tok not in earliest or dt < earliest[tok]:
-                earliest[tok] = dt
-
-    # ---- match each tap to a Canvas row + decide status ----
-    def match_row(name):
-        toks = norm_tokens(name)
-        if toks in aliases and aliases[toks] in by_login:
-            return by_login[aliases[toks]], "alias"
-        if toks in by_norm and len(by_norm[toks]) == 1:
-            return by_norm[toks][0], "exact"
-        if toks in by_norm:
-            return None, "ambiguous"
-        cand = [i for i in student_rows
-                if set(toks) and (set(toks) <= set(norm_tokens(rows[i][c_student]))
-                                  or set(norm_tokens(rows[i][c_student])) <= set(toks))]
-        if len(cand) == 1:
-            return cand[0], "approx"
-        return None, ("ambiguous" if cand else "none")
-
-    row_status = {}          # canvas row idx -> ("present"|"late"|"absent", value)
-    unregistered, unmatched, ambiguous = [], [], []
-    for tok, dt in earliest.items():
-        name = token_name.get(tok)
-        if name is None:
-            unregistered.append(tok[:8]); continue
-        idx, how = match_row(name)
-        if idx is None:
-            (ambiguous if how == "ambiguous" else unmatched).append(name); continue
-        mins = (dt - start_dt).total_seconds() / 60.0
-        if mins <= a.late_after:
-            st, val = "present", full_pts
-        elif mins <= a.close:
-            st, val = "late", late_pts
-        else:
-            st, val = "absent", 0.0          # arrived after attendance closed
-        prev = row_status.get(idx)
-        # if multiple cards map to one student, keep the best (earliest/highest) status
-        rank = {"present": 3, "late": 2, "absent": 1}
-        if prev is None or rank[st] > rank[prev[0]]:
-            row_status[idx] = (st, val)
-
-    # ---- fill the column: every student gets a value; absent = 0 ----
-    present = late = absent = 0
-    for i in student_rows:
-        st, val = row_status.get(i, ("absent", 0.0))
-        while len(rows[i]) <= c_target:
-            rows[i].append("")
-        rows[i][c_target] = fmt_points(val)
-        present += st == "present"; late += st == "late"; absent += st == "absent"
-
-    out = a.out or (os.path.splitext(a.canvas)[0] + "_filled.csv")
-    with open(out, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerows(rows)
-
-    # ---- summary ----
-    print(f"\nSession {a.date} {a.start}  (on-time <= {a.late_after:g} min, "
-          f"late <= {a.close:g} min @ {a.late_frac:g}x)")
-    print(f"Column : {header[c_target]}   (present={fmt_points(full_pts)}, "
-          f"late={fmt_points(late_pts)}, absent=0)")
-    print(f"Result : {present} present, {late} late, {absent} absent "
-          f"(of {len(student_rows)} enrolled)")
-    if unsynced:
-        print(f"! {unsynced} tap(s) had no NTP time (logged 'unsynced') and were skipped.")
-    if unmatched:
-        print(f"! {len(unmatched)} tapped name(s) not found in Canvas -> add to {a.aliases}:")
-        for n in sorted(set(unmatched)):
-            print(f"    \"{n}\",<their-sis-login-id@your-school.edu>")
-    if ambiguous:
-        print(f"! {len(ambiguous)} tapped name(s) matched more than one student (fix via {a.aliases}): "
-              + ", ".join(sorted(set(ambiguous))))
-    if unregistered:
-        print(f"! {len(unregistered)} tap(s) from cards not in the roster (unregistered): "
-              + ", ".join(unregistered))
-    print(f"\nWrote {out}  (import into Canvas; only '{header[c_target]}' was changed)")
+    out = a.out or default_out_path(a.canvas)
+    write_output(out, result.rows)
+    print(render_report(result, session, out))
 
 
 if __name__ == "__main__":

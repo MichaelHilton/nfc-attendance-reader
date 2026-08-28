@@ -1,0 +1,7 @@
+# Dependencies for regenerating the enclosure STLs with case_gen.py.
+#   pip install -r case/requirements.txt && cd case && python3 case_gen.py
+numpy
+trimesh
+manifold3d
+shapely
+matplotlib
