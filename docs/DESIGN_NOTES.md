@@ -143,6 +143,19 @@ shallow relief — preview STLs in a slicer with lighting.
   CYD's USB and VIN at the same time.
 - Charge-status LEDs are inside — hence the lid peek slot (§4).
 
+**TODO — on-screen battery indicator (not yet possible with this wiring).** The V713
+module boosts the LiPo to a regulated ~5 V into `VIN`, so the ESP32 sees the same
+voltage whether the cell is full or nearly flat — there is nothing to measure at
+`VIN`, and the cheap module exposes no charge-status line. Adding a battery gauge to
+the top status bar (`drawTopBar()` in the sketch) needs a hardware change, either:
+  - a wire from the raw LiPo **+** through a 2×100 kΩ divider into a free **ADC1** GPIO
+    (ADC2 is dead while WiFi is on; confirm a genuinely free ADC1 pin against the
+    ESP32-3248S035C schematic — GPIO35 on the CN1/P3 header, input-only, is the usual
+    candidate), then map ~3.3–4.2 V to a rough percentage (nonlinear, ±10–20%); or
+  - a **MAX17048** I²C fuel gauge on the existing PN532 bus (IO21/IO22) for true
+    state-of-charge, ~$5.
+  Until one of those is added, the firmware deliberately has no battery UI.
+
 ---
 
 ## 6. Security design (keep card numbers out of plain text)

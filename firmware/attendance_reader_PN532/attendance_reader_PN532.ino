@@ -136,6 +136,49 @@ void drawStatus(const char* big, const char* small, uint16_t color) {
 void beepKnown()   { tone(SPEAKER_PIN, 2000, 120); }   // short high ding
 void beepUnknown() { tone(SPEAKER_PIN, 350, 250);  }   // low buzz
 
+// --------------------------- top status bar --------------------------------
+// A 26 px band across the top: NTP clock on the left, WiFi state on the right.
+// Sits clear of drawStatus()'s center band (height/2 +/- 70), so the two never
+// fight. Each half is only repainted when its text actually changes, so calling
+// this once a second from loop() costs almost nothing and doesn't flicker.
+// No battery indicator yet -- see docs/DESIGN_NOTES.md section 5 for why.
+void drawTopBar(bool force = false) {
+  const int   H   = 26;
+  const int   mid = tft.width() / 2;
+  static char lastTs[24] = {0};
+  static int  lastWifi   = -1;
+
+  struct tm t;
+  char ts[24];
+  uint16_t tcol;
+  if (getLocalTime(&t, 20) && (t.tm_year + 1900) >= 2024) {
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
+    tcol = TFT_WHITE;
+  } else {
+    strcpy(ts, "clock not set");                 // no RTC: blank until WiFi+NTP
+    tcol = TFT_ORANGE;
+  }
+
+  tft.setTextSize(2);
+
+  if (force || strcmp(ts, lastTs) != 0) {        // left half: clock
+    tft.fillRect(0, 0, mid, H, TFT_NAVY);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(tcol, TFT_NAVY);
+    tft.drawString(ts, 4, H / 2);
+    strcpy(lastTs, ts);
+  }
+
+  int up = (WiFi.status() == WL_CONNECTED) ? 1 : 0;
+  if (force || up != lastWifi) {                 // right half: WiFi state
+    tft.fillRect(mid, 0, tft.width() - mid, H, TFT_NAVY);
+    tft.setTextDatum(MR_DATUM);
+    tft.setTextColor(up ? TFT_GREEN : TFT_RED, TFT_NAVY);
+    tft.drawString(up ? "WiFi" : "no WiFi", tft.width() - 4, H / 2);
+    lastWifi = up;
+  }
+}
+
 // ------------------------------- roster -------------------------------------
 void loadRoster() {
   rCount = 0;
@@ -330,6 +373,7 @@ void setup() {
   else              snprintf(note, sizeof(note), "%d in roster", rCount);
   drawStatus(nfcOK ? "Ready" : "Reader?", note,
              nfcOK ? (sdOK ? TFT_GREEN : TFT_ORANGE) : TFT_RED);
+  drawTopBar(true);                          // paint the clock/WiFi bar right away
   tone(SPEAKER_PIN, 1200, 80);               // boot blip
   Serial.println("Serial commands: dump | roster | upload | count | help");
 }
@@ -337,6 +381,9 @@ void setup() {
 // --------------------------------- loop -------------------------------------
 void loop() {
   handleSerial();                            // USB commands: dump the SD files, etc.
+
+  static unsigned long lastBar = 0;          // refresh the clock/WiFi bar once a second
+  if (millis() - lastBar >= 1000) { lastBar = millis(); drawTopBar(); }
 
   // clear the result back to "Ready" on a timer — no blocking delay
   if (showingResult && (long)(millis() - resultUntil) >= 0) {

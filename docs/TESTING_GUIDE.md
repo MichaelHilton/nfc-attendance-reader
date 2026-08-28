@@ -43,6 +43,26 @@ never copy them onto the SD card.
 
 ## Step 2 — Flash the firmware
 
+Either the Arduino IDE (2a) or the `firmware/flash.sh` script (2a-alt). Flash from
+the **host** the board is plugged into — USB flashing does not work through
+`software/serial_bridge.sh`.
+
+### 2a-alt. Scripted (arduino-cli)
+
+One-time: `./firmware/setup-arduino.sh` (installs arduino-cli, the ESP32 core, and
+the libraries; still needs a `User_Setup.h` for the 3.5" ST7796 CYD — see
+`docs/DESIGN_NOTES.md`). The devcontainer installs arduino-cli on create, so there
+you only need to run `setup-arduino.sh` once for the core + libraries.
+
+```
+./firmware/flash.sh            # auto-detect port, compile + upload
+./firmware/flash.sh -n         # compile only (no board needed)
+./firmware/flash.sh /dev/cu.usbserial-XXXX
+```
+
+Then confirm the boot output as in step 6 below. Inside the devcontainer only
+`-n` works — the host USB port isn't visible to the container.
+
 ### 2a. Normal flow
 
 1. Plug the CYD reader into the Mac with a **data** USB cable, **directly** (no hub/dock).
@@ -56,6 +76,8 @@ never copy them onto the SD card.
    Serial commands: dump | roster | upload | count | help
    ```
    The screen should show **Ready** — green if an SD card is inserted, orange if not.
+   The top bar shows the clock (`clock not set` until WiFi + NTP sync, then
+   `YYYY-MM-DD HH:MM:SS`) on the left and `WiFi` / `no WiFi` on the right.
 
 > The self-test uses a fixed test vector, so `HMAC OK, AES OK` proves the crypto
 > engine works **regardless of which key is loaded**. The real-key match is proven

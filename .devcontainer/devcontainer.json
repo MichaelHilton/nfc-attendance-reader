@@ -32,16 +32,23 @@
 	// outlives the container and holds ~/.claude (which includes
 	// .credentials.json). More info: https://containers.dev/implementors/json_reference/#mounts
 	"mounts": [
-		"source=attendance-claude-home,target=/home/vscode/.claude,type=volume"
+		"source=attendance-claude-home,target=/home/vscode/.claude,type=volume",
+		// Persist the arduino-cli toolchain across rebuilds -- the ESP32 core pulls
+		// ~5 GB of compilers, so firmware/setup-arduino.sh should only pay that once.
+		"source=attendance-arduino-data,target=/home/vscode/.arduino15,type=volume",
+		"source=attendance-arduino-libs,target=/home/vscode/Arduino,type=volume"
 	],
 
-	// - Give the vscode user ownership of the mounted volume (named volumes are
+	// - Give the vscode user ownership of the mounted volumes (named volumes are
 	//   created root-owned on first use, before this runs).
 	// - Keep ~/.claude.json (CLI state: auth account, onboarding, project trust)
 	//   on the persistent volume via a symlink so it survives rebuilds too.
 	// - Trust the workspace repo so git doesn't flag "dubious ownership"
 	//   (the bind-mounted /workspaces path can look owner-mismatched to git).
-	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}; sudo apt-get update && sudo apt-get install -y socat; pip3 install -r ${containerWorkspaceFolder}/requirements-dev.txt",
+	// - Install the arduino-cli *binary* only (tiny). The ESP32 core + libraries
+	//   (~5 GB) are left to ./firmware/setup-arduino.sh so a rebuild doesn't pull
+	//   them for people who never touch firmware; the volume above caches them.
+	"postCreateCommand": "sudo mkdir -p /home/vscode/.arduino15 /home/vscode/Arduino && sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.arduino15 /home/vscode/Arduino && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}; sudo apt-get update && sudo apt-get install -y socat; pip3 install -r ${containerWorkspaceFolder}/requirements-dev.txt; if ! command -v arduino-cli >/dev/null; then mkdir -p /home/vscode/.local/bin && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/home/vscode/.local/bin sh || echo 'arduino-cli install failed -- run ./firmware/setup-arduino.sh'; fi",
 
 	// The board's USB serial port lives on the host and cannot be passed into a
 	// Docker Desktop (macOS/Windows) container. Instead the host runs a socat
