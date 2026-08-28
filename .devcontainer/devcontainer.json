@@ -3,7 +3,11 @@
 {
 	"name": "Python 3",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-trixie"
+	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-trixie",
+
+	// Trust the workspace repo so git doesn't flag "dubious ownership"
+	// (the bind-mounted /workspaces path can look owner-mismatched to git).
+	"postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
