@@ -43,7 +43,7 @@ Canvas specifically (see `docs/DESIGN_NOTES.md` Section 7).
    folder and fill in your network, then upload the sketch. The Serial Monitor should
    print `crypto self-test: HMAC OK, AES OK`.
 3. **Register students:** `python3 software/register_cards.py` — each student taps and
-   types their AndrewID (3-8 characters) → writes `roster.csv` (only `token,encrypted_name`). Get it onto the
+   types their AndrewID (2-8 characters) → writes `roster.csv` (only `token,encrypted_name`). Get it onto the
    device either by copying the file to the SD card, or — with the device still plugged
    in — `python3 software/sd_upload.py roster.csv` (sends it over USB; the device swaps
    it in and reloads without a reboot).

@@ -25,10 +25,10 @@ import csv, os, sys, re
 import attendance_crypto as ac
 
 # ----------------------------- roster core (testable) -----------------------------
-ANDREW_ID_MIN, ANDREW_ID_MAX = 3, 8
+ANDREW_ID_MIN, ANDREW_ID_MAX = 2, 8
 
 def valid_andrew_id(s: str) -> bool:
-    """An AndrewID is 3-8 characters long."""
+    """An AndrewID is 2-8 characters long."""
     return ANDREW_ID_MIN <= len(s or "") <= ANDREW_ID_MAX
 
 def normalize_key(raw: str) -> str:

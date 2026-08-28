@@ -135,7 +135,7 @@ number + Enter) — *not* the CYD device.
    python3 register_cards.py
    ```
    A full-screen black window opens (green = ready, cyan = saved).
-2. For each test student: **tap the card**, then **type the AndrewID** (3-8 characters)
+2. For each test student: **tap the card**, then **type the AndrewID** (2-8 characters)
    and press **Enter**. The AndrewID is AES-encrypted; only `token,enc` is written —
    the card number is never stored.
 3. Register at least **2 cards** so we can see present/absent behavior later.

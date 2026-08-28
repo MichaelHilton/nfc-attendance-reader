@@ -42,10 +42,10 @@ def test_normalize_key_none():
 @pytest.mark.parametrize(
     "andrew_id, ok",
     [
-        ("abc", True),          # 3 chars — lower bound
+        ("ab", True),           # 2 chars — lower bound
         ("mhilton1", True),     # 8 chars — upper bound
         ("jdoe", True),
-        ("ab", False),          # 2 chars — too short
+        ("a", False),           # 1 char — too short
         ("", False),
         (None, False),
         ("mhilton12", False),   # 9 chars — too long
