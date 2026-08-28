@@ -10,7 +10,11 @@
 		// Node.js + npm, required by the Claude Code CLI feature below.
 		"ghcr.io/devcontainers/features/node:1": {},
 		// Installs the Claude Code CLI (`claude`) so it's available by default.
-		"ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+		// Lightweight desktop (Xvfb + Fluxbox) served over noVNC so GUI apps
+		// like software/register_cards.py can run. Sets DISPLAY=:1 in the
+		// container. Open the forwarded port 6080 in a browser; password: vscode.
+		"ghcr.io/devcontainers/features/desktop-lite:1": {}
 	},
 
 	// Configure tool-specific properties.
@@ -37,10 +41,21 @@
 	//   on the persistent volume via a symlink so it survives rebuilds too.
 	// - Trust the workspace repo so git doesn't flag "dubious ownership"
 	//   (the bind-mounted /workspaces path can look owner-mismatched to git).
-	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}; pip3 install -r ${containerWorkspaceFolder}/requirements-dev.txt"
+	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}; sudo apt-get update && sudo apt-get install -y socat; pip3 install -r ${containerWorkspaceFolder}/requirements-dev.txt",
 
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
+	// The board's USB serial port lives on the host and cannot be passed into a
+	// Docker Desktop (macOS/Windows) container. Instead the host runs a socat
+	// TCP bridge and the container maps that socket to a local PTY -- see
+	// software/SERIAL_BRIDGE.md. This makes host.docker.internal resolve on a
+	// Linux Docker host too (it already resolves under Docker Desktop).
+	"runArgs": ["--add-host=host.docker.internal:host-gateway"],
+
+	// 6080 = noVNC (browser desktop), 5901 = raw VNC (for a native VNC client).
+	"forwardPorts": [6080, 5901],
+	"portsAttributes": {
+		"6080": { "label": "Desktop (noVNC)" },
+		"5901": { "label": "Desktop (VNC)" }
+	}
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"

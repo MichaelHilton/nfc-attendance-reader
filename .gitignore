@@ -30,3 +30,6 @@ tests/native/_vectors_gen.h
 
 # OS cruft
 .DS_Store
+
+# socat serial-bridge PTY symlink (see software/SERIAL_BRIDGE.md)
+software/reader-port
