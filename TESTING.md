@@ -132,6 +132,7 @@ Canvas CSV rewrite. `main()` was split into `parse_args` / `build() -> Result` /
 | `test_decode.py` | `software/decode_attendance.py`: `find_token_column`, `read_attendance` for both input formats (device `millis,token` and a sheet export with a `token` header) including the `time_col` selection edge, `token_to_name` decrypt/failure handling, and the extracted `decode()` / `main()`. |
 | `test_register_core.py` | `software/register_cards.py` roster core (the tkinter GUI is out of scope): `normalize_key` (digit-strip, zero-pad, mod 2³² wrap), `load_roster`/`save_roster` round-trip (sorted, header, 32-char filter), `upsert` (added vs updated, returns previous value, count). |
 | `test_sd_download.py` | `software/sd_download.py` parsers split out of the serial loop: `parse_dump` (between `<<<BEGIN>>>`/`<<<END>>>` markers), `parse_count`, and `find_port` matching rules. The serial I/O itself is `# pragma: no cover`. |
+| `test_sd_upload.py` | `software/sd_upload.py` framing helpers split out of the serial loop: `checksum` (32-bit wrap), `build_header` (`<length> <checksum>`), `find_marker`, and `parse_result` (`<<<OK>>>`/`<<<ERR>>>` reply). The serial I/O itself is `# pragma: no cover`. |
 
 ### End-to-end
 

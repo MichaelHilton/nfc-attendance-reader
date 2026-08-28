@@ -53,7 +53,7 @@ never copy them onto the SD card.
 6. Open **Serial Monitor at 115200 baud** and confirm the boot lines:
    ```
    crypto self-test: HMAC OK, AES OK
-   Serial commands: dump | roster | count | help
+   Serial commands: dump | roster | upload | count | help
    ```
    The screen should show **Ready** — green if an SD card is inserted, orange if not.
 
@@ -155,6 +155,11 @@ Close the Arduino **Serial Monitor first** (only one program can hold the port).
    # if auto-detect misses: python3 sd_download.py --port /dev/cu.usbserial-XXXX
    python3 sd_download.py --cmd count      # quick row count
    python3 sd_download.py --cmd roster     # pull roster.csv back for a check
+   ```
+   To push a **new** roster.csv to the device without pulling the SD card:
+   ```bash
+   python3 sd_upload.py roster.csv        # sends it over USB; device swaps it in and reloads
+   python3 sd_download.py --cmd roster    # read it back to confirm
    ```
 2. Decode tokens → names (laptop-only, uses `secret.key`):
    ```bash

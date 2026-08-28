@@ -32,6 +32,7 @@ Canvas specifically (see `docs/DESIGN_NOTES.md` Section 7).
   - `build_gradebook.py` — fills a Canvas attendance column (Present/Late/Absent) from the log
   - `reader_test.py` — shows exactly what the USB registration reader types
   - `sd_download.py` — pulls `attendance.csv`/`roster.csv` off the device over USB serial
+  - `sd_upload.py` — pushes a new `roster.csv` to the device over USB serial (no SD card removal)
   - `aliases.csv` (copy from `aliases.csv.example`) — `typed_name,sis_login_id` fixups for names that don't match Canvas
 
 ## How the pieces fit
@@ -42,7 +43,10 @@ Canvas specifically (see `docs/DESIGN_NOTES.md` Section 7).
    folder and fill in your network, then upload the sketch. The Serial Monitor should
    print `crypto self-test: HMAC OK, AES OK`.
 3. **Register students:** `python3 software/register_cards.py` — each student taps and
-   types their name → writes `roster.csv` (only `token,encrypted_name`). Copy it to the SD card.
+   types their name → writes `roster.csv` (only `token,encrypted_name`). Get it onto the
+   device either by copying the file to the SD card, or — with the device still plugged
+   in — `python3 software/sd_upload.py roster.csv` (sends it over USB; the device swaps
+   it in and reloads without a reboot).
 4. **In class:** the device reads cards, shows names, logs `timestamp,token` to the SD
    (WiFi sets the clock over NTP; no cloud).
 5. **Grade:** pull the log with `sd_download.py`, then run `build_gradebook.py` with the

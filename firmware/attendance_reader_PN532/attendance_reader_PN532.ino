@@ -182,7 +182,7 @@ void logToSD(const char* token) {                               // attendance st
   if (f) { f.printf("%s,%s\n", ts, token); f.close(); }
 }
 
-// ---------- serial commands over USB (dump / roster / count / help) ----------
+// ---------- serial commands over USB (dump / roster / upload / count / help) ----------
 // Print a file wrapped in markers the Python downloader looks for.
 void dumpFile(const char* path, const char* label) {
   Serial.printf("<<<BEGIN %s>>>\n", label);
@@ -195,6 +195,79 @@ void dumpFile(const char* path, const char* label) {
   Serial.printf("\n<<<END %s>>>\n", label);
 }
 
+// Receive a new roster.csv over USB and replace the one on the SD card.
+// Protocol:  host sends "upload\n"  ->  device prints "<<<READY>>>"
+//            host sends "<length> <checksum>\n"  then <length> raw bytes
+//            (checksum = sum of every byte, wrapped to 32 bits)
+//            device -> "<<<OK roster.csv N bytes, M entries>>>"  on success
+//                      "<<<ERR ...>>>"                            otherwise
+// The file is streamed to /roster.new, verified (size + checksum), then renamed
+// over /roster.csv so a dropped connection never corrupts the live roster.
+void recvRoster() {
+  if (!sdOK) { Serial.println("<<<ERR no SD card>>>"); return; }
+  Serial.println("<<<READY>>>");
+
+  // ---- header line: "<length> <checksum>" (30 s to arrive) ----
+  char hdr[48]; int hn = 0; unsigned long t0 = millis();
+  while (millis() - t0 < 30000) {
+    int c = Serial.read();
+    if (c < 0) continue;
+    if (c == '\r') continue;
+    if (c == '\n') break;
+    if (hn < (int)sizeof(hdr) - 1) hdr[hn++] = (char)c;
+  }
+  hdr[hn] = 0;
+  unsigned long want = 0, wantSum = 0;
+  if (sscanf(hdr, "%lu %lu", &want, &wantSum) != 2 || want == 0 || want > 200000UL) {
+    Serial.printf("<<<ERR bad header '%s'>>>\n", hdr);
+    return;
+  }
+
+  drawStatus("Updating", "roster...", TFT_YELLOW);
+
+  // ---- stream the bytes into a temp file ----
+  SD.remove("/roster.new");
+  File f = SD.open("/roster.new", FILE_WRITE);
+  if (!f) { Serial.println("<<<ERR cannot open /roster.new>>>"); return; }
+
+  uint8_t buf[256];
+  unsigned long got = 0, sum = 0;
+  t0 = millis();
+  while (got < want && millis() - t0 < 15000) {
+    size_t chunk = want - got;
+    if (chunk > sizeof(buf)) chunk = sizeof(buf);
+    int nread = Serial.readBytes(buf, chunk);          // honours the 1 s stream timeout
+    if (nread <= 0) continue;
+    f.write(buf, nread);
+    for (int i = 0; i < nread; i++) sum += buf[i];
+    sum &= 0xFFFFFFFFUL;
+    got += nread;
+    t0 = millis();
+  }
+  f.close();
+
+  if (got != want || sum != wantSum) {
+    SD.remove("/roster.new");
+    Serial.printf("<<<ERR got %lu/%lu bytes, sum %lu/%lu>>>\n", got, want, sum, wantSum);
+    drawStatus("Update", "FAILED", TFT_RED);
+    return;
+  }
+
+  SD.remove("/roster.csv");
+  if (!SD.rename("/roster.new", "/roster.csv")) {
+    Serial.println("<<<ERR rename failed>>>");
+    drawStatus("Update", "FAILED", TFT_RED);
+    return;
+  }
+
+  loadRoster();
+  Serial.printf("<<<OK roster.csv %lu bytes, %d entries>>>\n", want, rCount);
+  char note[40]; snprintf(note, sizeof(note), "%d in roster", rCount);
+  drawStatus("Updated", note, TFT_GREEN);
+  resultUntil = millis() + RESULT_MS;
+  showingResult = true;
+}
+
 void handleSerial() {
   static char cmd[16]; static int n = 0;
   while (Serial.available()) {
@@ -204,13 +277,14 @@ void handleSerial() {
       cmd[n] = 0; n = 0;
       if      (!strcasecmp(cmd, "dump"))   dumpFile("/attendance.csv", "attendance.csv");
       else if (!strcasecmp(cmd, "roster")) dumpFile("/roster.csv", "roster.csv");
+      else if (!strcasecmp(cmd, "upload")) recvRoster();
       else if (!strcasecmp(cmd, "count")) {
         int rows = -1;
         if (sdOK) { File f = SD.open("/attendance.csv"); if (f) { rows = 0; while (f.available()) if (f.read() == '\n') rows++; f.close(); } }
         Serial.printf("attendance rows: %d\n", rows > 0 ? rows - 1 : 0);   // minus header
       }
       else if (!strcasecmp(cmd, "help") || !strcmp(cmd, "?"))
-        Serial.println("Commands: dump | roster | count | help");
+        Serial.println("Commands: dump | roster | upload | count | help");
       else Serial.printf("? unknown '%s' (try 'help')\n", cmd);
     } else if (n < 15) cmd[n++] = c;
   }
@@ -257,7 +331,7 @@ void setup() {
   drawStatus(nfcOK ? "Ready" : "Reader?", note,
              nfcOK ? (sdOK ? TFT_GREEN : TFT_ORANGE) : TFT_RED);
   tone(SPEAKER_PIN, 1200, 80);               // boot blip
-  Serial.println("Serial commands: dump | roster | count | help");
+  Serial.println("Serial commands: dump | roster | upload | count | help");
 }
 
 // --------------------------------- loop -------------------------------------
