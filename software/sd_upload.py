@@ -137,8 +137,16 @@ def main():  # pragma: no cover  (opens a real serial port)
         sys.exit(f"device refused upload: {reply.strip('<> ')}")
 
     ser.write((build_header(data) + "\n").encode())
-    ser.write(data)
     ser.flush()
+    # Send the payload in small chunks with a brief pause between them. The
+    # device drains each chunk to the SD card before reading the next; blasting
+    # the whole file at once overruns its 256-byte serial buffer while it is
+    # busy writing, silently dropping bytes (symptom: "<<<ERR got X/Y bytes>>>").
+    CHUNK = 128
+    for i in range(0, len(data), CHUNK):
+        ser.write(data[i:i + CHUNK])
+        ser.flush()
+        time.sleep(0.02)
 
     ok, msg = parse_result(_serial_lines(ser, 30))
     ser.close()
