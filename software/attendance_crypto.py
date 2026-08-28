@@ -18,7 +18,8 @@ Requires:  pip install cryptography
 import os, hmac, hashlib, binascii
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-KEY_PATH_DEFAULT = "secret.key"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+KEY_PATH_DEFAULT = os.path.join(_HERE, "secret.key")
 
 
 def load_or_create_key(path=KEY_PATH_DEFAULT):
@@ -95,6 +96,7 @@ if __name__ == "__main__":
     h = encrypt_name(K, "Michael Hilton")
     print("enc len   =", len(h), "hex chars")
     print("roundtrip =", decrypt_name(K, h))
-    out_path = os.path.join("..", "firmware", "attendance_reader_PN532", "secret_key.h")
+    out_path = os.path.join(_HERE, "..", "firmware", "attendance_reader_PN532", "secret_key.h")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     open(out_path, "w").write(firmware_key_snippet(K))
     print("wrote %s (the sketch #includes it automatically — nothing to paste)" % out_path)

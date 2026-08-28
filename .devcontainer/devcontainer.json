@@ -37,7 +37,7 @@
 	//   on the persistent volume via a symlink so it survives rebuilds too.
 	// - Trust the workspace repo so git doesn't flag "dubious ownership"
 	//   (the bind-mounted /workspaces path can look owner-mismatched to git).
-	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}"
+	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}; pip3 install -r ${containerWorkspaceFolder}/requirements-dev.txt"
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
