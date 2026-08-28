@@ -2,7 +2,7 @@
 """
 Card registration station — builds an ENCRYPTED roster.csv for the reader.
 
-A student taps their ID card on the USB reader, types their name, and it's saved.
+A student taps their ID card on the USB reader, types their AndrewID, and it's saved.
 The window matches the device screen (black; green = ready, cyan = saved).
 
 Privacy: the card number is NEVER written to disk. roster.csv stores
@@ -25,6 +25,12 @@ import csv, os, sys, re
 import attendance_crypto as ac
 
 # ----------------------------- roster core (testable) -----------------------------
+ANDREW_ID_MIN, ANDREW_ID_MAX = 3, 8
+
+def valid_andrew_id(s: str) -> bool:
+    """An AndrewID is 3-8 characters long."""
+    return ANDREW_ID_MIN <= len(s or "") <= ANDREW_ID_MAX
+
 def normalize_key(raw: str) -> str:
     """Whatever the reader typed -> the device's exact id format (10-digit decimal)."""
     digits = re.sub(r"\D", "", raw or "")
@@ -110,8 +116,9 @@ def run_gui(path: str, key_path: str):
             state["token"] = ""
             big.config(text="Tap your card", fg=GREEN); small.config(text="hold it on the reader")
             entry.delete(0, tk.END); entry.place(relx=0.5, rely=1.5); entry.focus_set()   # off-screen capture
-        elif mode == "name":
-            big.config(text="Type your name", fg=CYAN); small.config(text="then press Enter")
+        elif mode == "andrewid":
+            big.config(text="Type your AndrewID", fg=CYAN)
+            small.config(text=f"{ANDREW_ID_MIN}-{ANDREW_ID_MAX} characters, then press Enter")
             entry.delete(0, tk.END); entry.place(relx=0.5, rely=0.70, anchor="center", relwidth=0.6); entry.focus_set()
         set_footer()
 
@@ -130,25 +137,25 @@ def run_gui(path: str, key_path: str):
             existing = load_roster(path).get(state["token"])
             if existing is not None:
                 try:
-                    name = ac.decrypt_name(K, existing)
+                    andrew_id = ac.decrypt_name(K, existing)
                 except Exception:
-                    name = ""
-                flash("Registration complete", name or "card already registered", CYAN)
+                    andrew_id = ""
+                flash("Registration complete", andrew_id or "card already registered", CYAN)
                 return
-            show("name")
-        elif state["mode"] == "name":
-            name = raw.strip()[:39]        # device name buffer is 39 chars
-            if not name:
-                small.config(text="please type your name, then Enter"); return
-            enc = ac.encrypt_name(K, name)
+            show("andrewid")
+        elif state["mode"] == "andrewid":
+            andrew_id = raw.strip()
+            if not valid_andrew_id(andrew_id):
+                small.config(text=f"AndrewID must be {ANDREW_ID_MIN}-{ANDREW_ID_MAX} characters"); return
+            enc = ac.encrypt_name(K, andrew_id)
             (action, prev), total = upsert(path, state["token"], enc)
             nonlocal count; count = total
             if action == "updated" and prev:
                 try: pn = ac.decrypt_name(K, prev)
                 except Exception: pn = ""
-                if pn and pn != name:
-                    flash("Updated", f"{pn}  →  {name}", CYAN); return
-            flash("Saved", name, CYAN)
+                if pn and pn != andrew_id:
+                    flash("Updated", f"{pn}  →  {andrew_id}", CYAN); return
+            flash("Saved", andrew_id, CYAN)
 
     root.bind("<Return>", on_return); root.bind("<KP_Enter>", on_return)
     root.bind("<Escape>", lambda e: root.destroy())

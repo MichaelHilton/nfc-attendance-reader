@@ -28,12 +28,12 @@ Canvas specifically (see `docs/DESIGN_NOTES.md` Section 7).
 - **software/** — laptop-side Python (needs `pip install cryptography pyserial`)
   - `attendance_crypto.py` — shared crypto (keys, tokens, name encryption)
   - `register_cards.py` — registration station GUI → builds encrypted `roster.csv`
-  - `decode_attendance.py` — turns logged tokens back into names
+  - `decode_attendance.py` — turns logged tokens back into AndrewIDs
   - `build_gradebook.py` — fills a Canvas attendance column (Present/Late/Absent) from the log
   - `reader_test.py` — shows exactly what the USB registration reader types
   - `sd_download.py` — pulls `attendance.csv`/`roster.csv` off the device over USB serial
   - `sd_upload.py` — pushes a new `roster.csv` to the device over USB serial (no SD card removal)
-  - `aliases.csv` (copy from `aliases.csv.example`) — `typed_name,sis_login_id` fixups for names that don't match Canvas
+  - `aliases.csv` (copy from `aliases.csv.example`) — `typed_value,sis_login_id` fixups for AndrewIDs/names that don't match Canvas
 
 ## How the pieces fit
 1. **Generate the key (once):** `python3 software/attendance_crypto.py` → creates
@@ -43,16 +43,17 @@ Canvas specifically (see `docs/DESIGN_NOTES.md` Section 7).
    folder and fill in your network, then upload the sketch. The Serial Monitor should
    print `crypto self-test: HMAC OK, AES OK`.
 3. **Register students:** `python3 software/register_cards.py` — each student taps and
-   types their name → writes `roster.csv` (only `token,encrypted_name`). Get it onto the
+   types their AndrewID (3-8 characters) → writes `roster.csv` (only `token,encrypted_name`). Get it onto the
    device either by copying the file to the SD card, or — with the device still plugged
    in — `python3 software/sd_upload.py roster.csv` (sends it over USB; the device swaps
    it in and reloads without a reboot).
-4. **In class:** the device reads cards, shows names, logs `timestamp,token` to the SD
+4. **In class:** the device reads cards, shows the AndrewID, logs `timestamp,token` to the SD
    (WiFi sets the clock over NTP; no cloud).
 5. **Grade:** pull the log with `sd_download.py`, then run `build_gradebook.py` with the
-   session date/time and the Canvas column to fill — it writes a Canvas-importable CSV
-   (Present/Late/Absent, absent = 0). `decode_attendance.py` gives a plain names+times list
-   if you just want to read the log.
+   session date/time and the Canvas column to fill — it matches each AndrewID to a Canvas
+   student by SIS Login ID and writes a Canvas-importable CSV (Present/Late/Absent,
+   absent = 0). `decode_attendance.py` gives a plain AndrewID+times list if you just want
+   to read the log.
 
 Example gradebook run:
 ```
@@ -60,12 +61,12 @@ python3 software/build_gradebook.py --canvas Grades.csv --attendance attendance.
     --date 2026-08-25 --start 10:00 --late-after 10 --close 30 --late-frac 0.5 \
     --column "Aug 25 Activity"
 ```
-Names that don't match Canvas are reported; pin them once in `aliases.csv`
-(`typed_name,sis_login_id`) and re-run.
+AndrewIDs match Canvas students by SIS Login ID. Anything that still doesn't match
+is reported; pin it once in `aliases.csv` (`typed_value,sis_login_id`) and re-run.
 
 ## Security model
 - Card numbers are **never** written to disk — only `token = HMAC-SHA256(key, id)`.
-- Names are **AES-256 encrypted**; the device decrypts to display, the SD holds only ciphertext.
+- The AndrewID is **AES-256 encrypted**; the device decrypts to display, the SD holds only ciphertext.
 - The key lives in the firmware + `secret.key` on your laptop — never on the SD or in the cloud.
 - Protects against a lost SD card / copied files. Does not, by itself, stop someone
   dumping the ESP32 flash (that would need flash-encryption + secure-boot).

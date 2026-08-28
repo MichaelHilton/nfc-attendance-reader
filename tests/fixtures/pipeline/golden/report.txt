@@ -3,7 +3,7 @@ Session 2026-08-27 10:00  (on-time <= 10 min, late <= 30 min @ 0.5x)
 Column : Aug 27 Activity (999002)   (present=2, late=1, absent=0)
 Result : 3 present, 1 late, 1 absent (of 5 enrolled)
 ! 1 tap(s) had no NTP time (logged 'unsynced') and were skipped.
-! 1 tapped name(s) not found in Canvas -> add to aliases.csv:
+! 1 tapped ID(s) not found in Canvas -> add to aliases.csv:
     "Ghost Student",<their-sis-login-id@your-school.edu>
 ! 1 tap(s) from cards not in the roster (unregistered): deadbeef
 

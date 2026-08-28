@@ -64,3 +64,33 @@ def test_alias_checked_before_exact():
     i = idx(("Chen, Alice", "alice@x.edu"), ("Diaz, Bob", "bob@x.edu"))
     aliases = {bg.norm_tokens("Alice Chen"): "bob@x.edu"}
     assert bg.match_row(i, "Alice Chen", aliases) == (3, "alias")
+
+
+# ------------------------------ AndrewID matching --------------------
+def test_andrew_id_matches_sis_login_local_part():
+    i = idx(("Chen, Alice", "achen@andrew.cmu.edu"), ("Diaz, Bob", "bdiaz@andrew.cmu.edu"))
+    assert bg.match_row(i, "achen", {}) == (2, "andrewid")
+    assert bg.match_row(i, "bdiaz", {}) == (3, "andrewid")
+
+
+def test_andrew_id_is_case_insensitive():
+    i = idx(("Chen, Alice", "achen@andrew.cmu.edu"))
+    assert bg.match_row(i, "AChen", {}) == (2, "andrewid")
+
+
+def test_andrew_id_wins_over_name_but_not_over_alias():
+    # "bdiaz" is Bob's AndrewID; an alias deliberately remaps it to Alice.
+    i = idx(("Chen, Alice", "achen@andrew.cmu.edu"), ("Diaz, Bob", "bdiaz@andrew.cmu.edu"))
+    assert bg.match_row(i, "bdiaz", {}) == (3, "andrewid")
+    aliases = {bg.norm_tokens("bdiaz"): "achen@andrew.cmu.edu"}
+    assert bg.match_row(i, "bdiaz", aliases) == (2, "alias")
+
+
+def test_andrew_id_shared_local_part_is_ambiguous():
+    i = idx(("Chen, Alex", "achen@andrew.cmu.edu"), ("Chen, Amy", "achen@x.edu"))
+    assert bg.match_row(i, "achen", {}) == (None, "ambiguous")
+
+
+def test_unknown_andrew_id_with_no_name_match_is_none():
+    i = idx(("Chen, Alice", "achen@andrew.cmu.edu"))
+    assert bg.match_row(i, "zzzzz", {}) == (None, "none")

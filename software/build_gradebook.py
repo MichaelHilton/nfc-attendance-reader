@@ -2,17 +2,20 @@
 """
 Fill a Canvas gradebook attendance column from the reader's SD log.
 
-Runs on your laptop (which has secret.key). It decrypts each logged token -> the name
-typed at registration, matches that name to a Canvas student, decides Present/Late/Absent
-from the tap time, and writes a Canvas-importable CSV with just the one attendance column
-filled. Absent = 0.
+Runs on your laptop (which has secret.key). It decrypts each logged token -> the AndrewID
+typed at registration, matches that AndrewID to a Canvas student by SIS Login ID, decides
+Present/Late/Absent from the tap time, and writes a Canvas-importable CSV with just the one
+attendance column filled. Absent = 0.
+
+Older rosters that stored a typed name still work: matching falls back to name
+comparison (and the --aliases file) when a value isn't an AndrewID.
 
 Inputs
   --canvas     Canvas gradebook export CSV (required)
   --attendance device log 'timestamp,token' (default attendance.csv)
   --roster     encrypted roster 'token,enc' (default roster.csv)
   --key        secret.key (default secret.key)
-  --aliases    name fixups 'typed_name,sis_login_id' (default aliases.csv, optional)
+  --aliases    name/ID fixups 'typed_value,sis_login_id' (default aliases.csv, optional)
 Session
   --date       session date YYYY-MM-DD (required)
   --start      class start HH:MM 24h (required)
@@ -74,12 +77,12 @@ def load_token_names(K, roster_path):
 
 
 def load_aliases(path):
-    """{norm_tokens(typed_name): sis_login_lower}"""
+    """{norm_tokens(typed_value): sis_login_lower}"""
     m = {}
     if path and os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as f:
             for row in csv.reader(f):
-                if not row or len(row) < 2 or row[0].strip().lower() in ("", "typed_name"):
+                if not row or len(row) < 2 or row[0].strip().lower() in ("", "typed_name", "typed_value"):
                     continue
                 m[norm_tokens(row[0])] = row[1].strip().lower()
     return m
@@ -96,6 +99,7 @@ class CanvasIndex:
     c_login: int
     student_rows: list               # row indices that look like enrolled students
     by_login: dict                   # sis_login_lower -> row index
+    by_andrew: dict                  # andrew_id_lower (SIS login local-part) -> [row indices]
     by_norm: dict                    # norm_tokens(student name) -> [row indices]
 
 
@@ -122,12 +126,16 @@ def build_index(rows):
     # student rows = rows with an email in SIS Login ID
     student_rows = [i for i in range(2, len(rows))
                     if len(rows[i]) > c_login and "@" in rows[i][c_login]]
-    by_login, by_norm = {}, {}
+    by_login, by_andrew, by_norm = {}, {}, {}
     for i in student_rows:
-        by_login[rows[i][c_login].strip().lower()] = i
+        login = rows[i][c_login].strip().lower()
+        by_login[login] = i
+        local = login.split("@", 1)[0]
+        if local:
+            by_andrew.setdefault(local, []).append(i)
         by_norm.setdefault(norm_tokens(rows[i][c_student]), []).append(i)
     return CanvasIndex(header, points_row, rows, c_student, c_login,
-                       student_rows, by_login, by_norm)
+                       student_rows, by_login, by_andrew, by_norm)
 
 
 def resolve_column(index, column):
@@ -179,15 +187,21 @@ def read_earliest_taps(path, date):
 
 
 # ------------------------------- matching ------------------------------
-def match_row(index, name, aliases):
-    """Map a tapped name to a Canvas row index.
+def match_row(index, value, aliases):
+    """Map a tapped value (an AndrewID, or a typed name from an older roster) to a
+    Canvas row index.
 
     Returns (row_index, how) where how is one of
-    'alias' | 'exact' | 'approx', or (None, how) with how in 'ambiguous' | 'none'.
+    'alias' | 'andrewid' | 'exact' | 'approx', or (None, how) with how in
+    'ambiguous' | 'none'.
     """
-    toks = norm_tokens(name)
+    toks = norm_tokens(value)
     if toks in aliases and aliases[toks] in index.by_login:
         return index.by_login[aliases[toks]], "alias"
+    aid = (value or "").strip().lower()
+    if aid in index.by_andrew:
+        hits = index.by_andrew[aid]
+        return (hits[0], "andrewid") if len(hits) == 1 else (None, "ambiguous")
     if toks in index.by_norm and len(index.by_norm[toks]) == 1:
         return index.by_norm[toks][0], "exact"
     if toks in index.by_norm:
@@ -250,7 +264,7 @@ def build(canvas_path, attendance_path, roster_path, aliases_path, K, session):
     except ValueError:
         sys.exit("Bad --date/--start (want YYYY-MM-DD and HH:MM)")
 
-    token_name = load_token_names(K, roster_path)
+    token_id = load_token_names(K, roster_path)
     aliases = load_aliases(aliases_path)
 
     index = build_index(parse_canvas(canvas_path))
@@ -263,12 +277,12 @@ def build(canvas_path, attendance_path, roster_path, aliases_path, K, session):
     row_status = {}          # canvas row idx -> ("present"|"late"|"absent", value)
     unregistered, unmatched, ambiguous = [], [], []
     for tok, dt in earliest.items():
-        name = token_name.get(tok)
-        if name is None:
+        who = token_id.get(tok)
+        if who is None:
             unregistered.append(tok[:8]); continue
-        idx, how = match_row(index, name, aliases)
+        idx, how = match_row(index, who, aliases)
         if idx is None:
-            (ambiguous if how == "ambiguous" else unmatched).append(name); continue
+            (ambiguous if how == "ambiguous" else unmatched).append(who); continue
         mins = (dt - start_dt).total_seconds() / 60.0
         st, val = score_tap(mins, session, full_pts, late_pts)
         prev = row_status.get(idx)
@@ -322,11 +336,11 @@ def render_report(result, session, out_path):
     if r.unsynced:
         lines.append(f"! {r.unsynced} tap(s) had no NTP time (logged 'unsynced') and were skipped.")
     if r.unmatched:
-        lines.append(f"! {len(r.unmatched)} tapped name(s) not found in Canvas -> add to {r.aliases_path}:")
+        lines.append(f"! {len(r.unmatched)} tapped ID(s) not found in Canvas -> add to {r.aliases_path}:")
         for n in sorted(set(r.unmatched)):
             lines.append(f"    \"{n}\",<their-sis-login-id@your-school.edu>")
     if r.ambiguous:
-        lines.append(f"! {len(r.ambiguous)} tapped name(s) matched more than one student "
+        lines.append(f"! {len(r.ambiguous)} tapped ID(s) matched more than one student "
                      f"(fix via {r.aliases_path}): " + ", ".join(sorted(set(r.ambiguous))))
     if r.unregistered:
         lines.append(f"! {len(r.unregistered)} tap(s) from cards not in the roster (unregistered): "

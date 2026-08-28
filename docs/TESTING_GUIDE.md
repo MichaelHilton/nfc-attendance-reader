@@ -135,9 +135,9 @@ number + Enter) — *not* the CYD device.
    python3 register_cards.py
    ```
    A full-screen black window opens (green = ready, cyan = saved).
-2. For each test student: **tap the card**, then **type the name** and press **Enter**.
-   The name is AES-encrypted; only `token,enc` is written — the card number is
-   never stored.
+2. For each test student: **tap the card**, then **type the AndrewID** (3-8 characters)
+   and press **Enter**. The AndrewID is AES-encrypted; only `token,enc` is written —
+   the card number is never stored.
 3. Register at least **2 cards** so we can see present/absent behavior later.
 4. Press **Esc** to quit. This produces `software/roster.csv`.
 5. **Copy `roster.csv` onto the device's SD card** (root of the card, filename
@@ -215,14 +215,15 @@ Scoring (per the earliest tap per student that day):
 - after `--close`, or never tapped → **Absent = 0**
 
 It writes `Grades_filled.csv` (**only the one column changes**) and prints a report:
-present/late/absent counts, plus any **unmatched names**, **ambiguous names**,
+present/late/absent counts, plus any **unmatched IDs**, **ambiguous IDs**,
 **unregistered cards**, and **unsynced taps**.
 
-Fix name mismatches once in `software/aliases.csv` (start from
+AndrewIDs match Canvas by the local-part of `SIS Login ID`. Fix anything that
+still doesn't match once in `software/aliases.csv` (start from
 `aliases.csv.example`):
 ```
-typed_name,sis_login_id
-Mike Smith,msmith2@example.edu
+typed_value,sis_login_id
+jdoe,jdoe2@example.edu
 ```
 then re-run. Import `Grades_filled.csv` back into Canvas.
 

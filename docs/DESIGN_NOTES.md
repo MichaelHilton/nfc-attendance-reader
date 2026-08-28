@@ -202,10 +202,12 @@ Decisions:
 - **Cut the Google Apps Script / cloud entirely.** The device just logs to SD.
 - **Add NTP** to the firmware (WiFi stays only to set the clock) so each tap is timestamped
   → the script can group by day and compute lateness.
-- **Matching:** students **type their names** at registration; the script matches typed
-  name → Canvas `"Last, First"` with normalization (case, punctuation, name order) plus an
-  **`aliases.csv`** to pin oddballs once, and an **unmatched report** each run (nothing is
-  silently dropped). We chose *not* to add roster autocomplete.
+- **Matching:** students **type their AndrewID** (3-8 chars) at registration; the script
+  matches it → Canvas **`SIS Login ID`** by local-part (exact, case-insensitive). Older
+  rosters that stored a typed name still fall back to name normalization (case, punctuation,
+  name order). An **`aliases.csv`** pins oddballs once (`typed_value → SIS Login ID`), and
+  an **unmatched report** each run (nothing is silently dropped). We chose *not* to add
+  roster autocomplete.
 - **Scoring: Present / Late / Absent tiers.** On-time within a window → full points; within
   a later window → partial; otherwise **absent = explicit 0**. Windows/points are per-run
   parameters.

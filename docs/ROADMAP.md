@@ -14,8 +14,9 @@ reasoning behind the gradebook decisions.
   real local `timestamp,token`; before the clock syncs, rows are written
   `unsynced-<millis>` and the gradebook skips/flags them.
 - **`software/build_gradebook.py` — written and verified.**
-  Decrypts the roster, matches typed names to Canvas (alias → SIS Login ID, then
-  exact normalized, then unique-subset for middle initials), scores
+  Decrypts the roster, matches each AndrewID to Canvas by SIS Login ID local-part
+  (alias first; then, for older name-based rosters, exact normalized and
+  unique-subset for middle initials), scores
   Present/Late/Absent per session (`--date --start --late-after --close
   --late-frac --column`), absent = 0, and writes a Canvas-importable CSV plus a
   clear report of unmatched names, unregistered cards, and unsynced rows.

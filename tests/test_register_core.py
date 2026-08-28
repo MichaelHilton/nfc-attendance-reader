@@ -38,6 +38,24 @@ def test_normalize_key_none():
     assert rc.normalize_key(None) == ""
 
 
+# ------------------------------ valid_andrew_id ----------------------
+@pytest.mark.parametrize(
+    "andrew_id, ok",
+    [
+        ("abc", True),          # 3 chars — lower bound
+        ("mhilton1", True),     # 8 chars — upper bound
+        ("jdoe", True),
+        ("ab", False),          # 2 chars — too short
+        ("", False),
+        (None, False),
+        ("mhilton12", False),   # 9 chars — too long
+        ("waytoolongandrewid", False),
+    ],
+)
+def test_valid_andrew_id(andrew_id, ok):
+    assert rc.valid_andrew_id(andrew_id) is ok
+
+
 # ------------------------ load_roster / save_roster ------------------
 def test_load_roster_missing_file_is_empty(tmp_path):
     assert rc.load_roster(str(tmp_path / "roster.csv")) == {}
