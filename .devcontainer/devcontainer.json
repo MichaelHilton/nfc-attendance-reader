@@ -5,21 +5,42 @@
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-trixie",
 
-	// Trust the workspace repo so git doesn't flag "dubious ownership"
-	// (the bind-mounted /workspaces path can look owner-mismatched to git).
-	"postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}"
-
 	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
+	"features": {
+		// Node.js + npm, required by the Claude Code CLI feature below.
+		"ghcr.io/devcontainers/features/node:1": {},
+		// Installs the Claude Code CLI (`claude`) so it's available by default.
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+	},
+
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			// Install the Claude Code VS Code extension automatically.
+			"extensions": [
+				"anthropic.claude-code"
+			]
+		}
+	},
+
+	// Persist Claude Code's login across container rebuilds so you don't have to
+	// re-authenticate every time you reopen the container. The named volume
+	// outlives the container and holds ~/.claude (which includes
+	// .credentials.json). More info: https://containers.dev/implementors/json_reference/#mounts
+	"mounts": [
+		"source=attendance-claude-home,target=/home/vscode/.claude,type=volume"
+	],
+
+	// - Give the vscode user ownership of the mounted volume (named volumes are
+	//   created root-owned on first use, before this runs).
+	// - Keep ~/.claude.json (CLI state: auth account, onboarding, project trust)
+	//   on the persistent volume via a symlink so it survives rebuilds too.
+	// - Trust the workspace repo so git doesn't flag "dubious ownership"
+	//   (the bind-mounted /workspaces path can look owner-mismatched to git).
+	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && { [ -f /home/vscode/.claude/.claude.json ] || cp /home/vscode/.claude.json /home/vscode/.claude/.claude.json 2>/dev/null || echo '{}' > /home/vscode/.claude/.claude.json; }; ln -sf /home/vscode/.claude/.claude.json /home/vscode/.claude.json; git config --global --add safe.directory ${containerWorkspaceFolder}"
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "pip3 install --user -r requirements.txt",
-
-	// Configure tool-specific properties.
-	// "customizations": {},
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
