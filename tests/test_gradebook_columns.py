@@ -60,6 +60,20 @@ def test_points_possible_non_numeric_defaults_to_one():
     assert full == 1.0 and warning is not None
 
 
+def test_extra_posting_policy_row_before_points_possible_is_skipped():
+    # Some Canvas exports insert a 'Manual Posting' row between the header and
+    # the real Points Possible row; build_index must find Points Possible by
+    # content, not assume it's always rows[1].
+    header = ["Student", "SIS Login ID", "Oral Exam (1)"]
+    posting_policy = ["", "", "Manual Posting"]
+    points = ["    Points Possible", "", "3.00"]
+    student = ["Chen, Alice", "a@x.edu", ""]
+    i = bg.build_index([header, posting_policy, points, student])
+    assert i.student_rows == [3]
+    full, warning = bg.points_for_column(i, bg.resolve_column(i, "Oral Exam"))
+    assert full == 3.0 and warning is None
+
+
 def test_missing_student_column_exits():
     with pytest.raises(SystemExit):
         bg.build_index([["Name", "SIS Login ID", "Wk1"], ["Points Possible", "", ""],

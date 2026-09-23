@@ -118,13 +118,25 @@ def _canvas_col_index(header, name):
     sys.exit(f"Canvas CSV has no '{name}' column.")
 
 
+def _find_points_row(rows, c_student):
+    """Index of the 'Points Possible' row. Usually rows[1], but some Canvas
+    exports insert an extra posting-policy row ('Manual Posting' etc.) between
+    the header and it, so scan for it instead of assuming a fixed offset."""
+    for i in range(1, len(rows)):
+        if len(rows[i]) > c_student and rows[i][c_student].strip().lower() == "points possible":
+            return i
+    return 1                                    # fallback: classic 2-row header
+
+
 def build_index(rows):
-    header, points_row = rows[0], rows[1]
+    header = rows[0]
     c_student = _canvas_col_index(header, "Student")
     c_login = _canvas_col_index(header, "SIS Login ID")
+    points_idx = _find_points_row(rows, c_student)
+    points_row = rows[points_idx]
 
     # student rows = rows with an email in SIS Login ID
-    student_rows = [i for i in range(2, len(rows))
+    student_rows = [i for i in range(points_idx + 1, len(rows))
                     if len(rows[i]) > c_login and "@" in rows[i][c_login]]
     by_login, by_andrew, by_norm = {}, {}, {}
     for i in student_rows:
