@@ -18,7 +18,10 @@ the kind of contribution that's useful.
 
 - Never commit real student data, a real `secret.key`/`secret_key.h`, or real
   WiFi credentials -- check `.gitignore` covers anything new you add that could
-  contain them.
+  contain them. That includes every derived file: registration logs, recovered
+  or decoded attendance, per-student reports, and Canvas exports (which Canvas
+  names like `2026-09-11T0947_Grades-<course>.csv`). Test fixtures use made-up
+  names only. Run `git status --ignored` before committing if unsure.
 - If you change the crypto (`software/attendance_crypto.py` or the firmware's
   mbedTLS calls in `crypto.hpp`), keep both sides byte-for-byte compatible --
   update `tests/fixtures/crypto_vectors.json` and the firmware self-test
@@ -30,7 +33,9 @@ the kind of contribution that's useful.
   .venv/bin/pytest
   ```
 
-  CI runs the same on Python 3.11–3.14. `TESTING.md` explains how to run subsets
+  Inside the dev container the deps are preinstalled, so just run
+  `python3 -m pytest` (a `.venv` made on the host won't run there). CI runs the
+  same on Python 3.11–3.14. `TESTING.md` explains how to run subsets
   and what each test file protects; `docs/TESTING_PLAN.md` is the strategy behind
   it.
 - For changes without test coverage yet, also run the relevant Python script

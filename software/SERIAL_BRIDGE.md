@@ -5,7 +5,9 @@ Linux) belongs to the **host**. Docker Desktop on macOS/Windows runs the
 container inside a Linux VM and does **not** forward USB devices, so there is no
 `devcontainer.json` setting that makes the port appear inside the container.
 
-Instead we bridge it over TCP with `socat`:
+The simplest alternative is to run the serial tools on the host itself, from the
+host virtualenv (`software/path/to/venv`, see `docs/TESTING_GUIDE.md` Step 0).
+If you'd rather stay in the container, bridge the port over TCP with `socat`:
 
 ```
 host machine                          dev container

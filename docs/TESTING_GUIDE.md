@@ -4,7 +4,8 @@ A step-by-step walkthrough for testing the whole system from a clean slate:
 **key → firmware → register cards → tap in class → download log → gradebook.**
 
 Everything laptop-side runs from the `software/` folder unless noted. The reader
-plugs into the Mac over USB.
+plugs into the Mac over USB. Read **Step 0** first if you work in the dev container:
+some commands have to run on the Mac itself.
 
 The pipeline:
 
@@ -13,6 +14,57 @@ The pipeline:
                                                                                   │
    Canvas CSV ◄── [6] build gradebook ◄── [5] download+decode ◄── [4] tap cards ◄┘
 ```
+
+---
+
+## Step 0 — Where to run what: dev container vs. host
+
+The dev container can't see the Mac's USB ports (Docker Desktop doesn't forward
+USB), so anything that talks to the board directly runs **on the host**:
+
+| Runs on the **host** (Mac) | Runs anywhere (container or host) |
+|---|---|
+| `firmware/flash.sh` upload (container: `-n` compile only) | `attendance_crypto.py` (key generation) |
+| Arduino IDE / `arduino-cli monitor` (Serial Monitor) | `register_cards.py`: in the container, use the browser desktop below |
+| `sd_download.py`, `sd_upload.py`, `reader_test.py`, unless you use the serial bridge | `decode_attendance.py`, `build_gradebook.py`, `recover_sessions.py` |
+| `software/serial_bridge_host.sh` (the host half of the bridge) | the test suite (`pytest`) |
+
+**Host virtualenv.** The Mac's Homebrew Python is externally managed (PEP 668), so
+the host-side scripts run from a virtualenv at `software/path/to/venv` (gitignored).
+It only needs the runtime dependencies (`cryptography`, `pyserial`). One-time setup,
+**on the host**, from `software/`:
+
+```bash
+cd software
+python3 -m venv path/to/venv
+path/to/venv/bin/pip install -r requirements.txt
+```
+
+After that, in each host terminal session:
+
+```bash
+cd software
+source path/to/venv/bin/activate      # now `python3` has cryptography + pyserial
+python3 sd_download.py
+```
+
+(or skip `activate` and call `path/to/venv/bin/python3 sd_download.py` directly).
+
+This venv, like the repo-root `.venv/` (the host's test venv, see `TESTING.md`),
+holds macOS binaries and **does not work inside the container**. That's expected.
+The container doesn't need it: `postCreateCommand` installs `requirements-dev.txt`
+into the container's own Python, so there you just run `python3 …`.
+
+**Using the board from inside the container anyway.** Instead of switching to the
+host, you can bridge the serial port into the container over TCP. See
+`software/SERIAL_BRIDGE.md`. The bridge works for `sd_download.py`, `sd_upload.py`
+and `reader_test.py`, but **not** for flashing.
+
+**GUI in the container.** `register_cards.py` needs a display. The container runs
+a lightweight desktop served over noVNC: open the forwarded port **6080** in a
+browser (password `vscode`), open a terminal there, and run the script. The USB
+registration reader "types" into whatever window has focus, so keep the noVNC
+browser tab focused while students tap.
 
 ---
 
@@ -79,6 +131,22 @@ Then confirm the boot output as in step 6 below. Inside the devcontainer only
    The top bar shows the clock (`clock not set` until WiFi + NTP sync, then
    `YYYY-MM-DD HH:MM:SS`) on the left and `WiFi` / `no WiFi` on the right.
 
+   The firmware currently also prints **temporary WiFi diagnostics** on the same
+   serial port. At boot it lists every 2.4 GHz network it can see and flags whether
+   your `WIFI_SSID` is among them. After that it prints the status every 2 s until
+   WiFi and NTP are both up:
+   ```
+   [wifi] target SSID="MyNetwork"  pass length=12
+   [wifi]   1) MyNetwork                        RSSI  -48  ch  6  secured   <-- MATCH
+   [wifi] status=DISCONNECTED
+   [wifi] CONNECTED  ip=172.20.10.3  gw=172.20.10.1  rssi=-47 dBm
+   [ntp]  clock set: 2026-09-23 10:02:11
+   ```
+   `NO_SSID_AVAIL` means the network isn't visible (5 GHz-only, or a phone hotspot
+   without *Maximize Compatibility*). `CONNECT_FAILED` usually means a wrong
+   password. From the command line: `arduino-cli monitor -p <port> -c baudrate=115200`
+   (on the host).
+
 > The self-test uses a fixed test vector, so `HMAC OK, AES OK` proves the crypto
 > engine works **regardless of which key is loaded**. The real-key match is proven
 > later when a registered card shows the correct name (Step 4).
@@ -138,11 +206,27 @@ number + Enter) — *not* the CYD device.
 2. For each test student: **tap the card**, then **type the AndrewID** (2-8 characters)
    and press **Enter**. The AndrewID is AES-encrypted; only `token,enc` is written —
    the card number is never stored.
+   - If the student taps **again** while the AndrewID prompt is up, the reader types
+     the card number into the box. An all-digit entry is rejected ("That's a card tap,
+     not an AndrewID"), so it can't be saved as an AndrewID. Just type the AndrewID.
+   - Tapping an already-registered card and entering a new AndrewID **updates** that
+     card (the screen shows the previous value).
 3. Register at least **2 cards** so we can see present/absent behavior later.
-4. Press **Esc** to quit. This produces `software/roster.csv`.
-5. **Copy `roster.csv` onto the device's SD card** (root of the card, filename
-   `roster.csv`). Re-insert the SD card into the reader and power-cycle it — the
-   screen should show `N in roster`.
+4. Press **Esc** to quit. This produces:
+   - `software/roster.csv`: `token,encrypted_andrewid`, rewritten in full on every save.
+   - `software/registration_log.csv`: `timestamp,token`, one line appended per
+     **new** card. This is the only record of *when* each card was registered.
+     `build_gradebook.py` uses it to credit students who registered in class but
+     never tapped the reader (Step 6). Keep it next to `roster.csv`. Both files are
+     gitignored.
+5. Get `roster.csv` onto the device, either:
+   - **over USB** (device plugged in, no SD removal):
+     `python3 sd_upload.py roster.csv` (host, or via the serial bridge). The device
+     swaps it in and reloads without a reboot. Or:
+   - **copy it to the SD card** (root of the card, filename `roster.csv`), re-insert
+     the card, and power-cycle the reader.
+
+   The screen should show `N in roster`.
 
 > Optional sanity check of what the USB reader actually types:
 > `python3 reader_test.py`, then tap a card.
@@ -169,6 +253,8 @@ number + Enter) — *not* the CYD device.
 ## Step 5 — Download + decode the log
 
 Close the Arduino **Serial Monitor first** (only one program can hold the port).
+The `sd_*` commands run **on the host** in the host venv (Step 0) or through the
+serial bridge.
 
 1. Pull the log off the device over USB:
    ```bash
@@ -227,20 +313,85 @@ jdoe,jdoe2@example.edu
 ```
 then re-run. Import `Grades_filled.csv` back into Canvas.
 
+**Students who registered but never tapped.** If `registration_log.csv` (from
+Step 3) is in the working directory, a student with **no tap** on `--date` but a
+card **registered that day** is scored from the registration time, using the same
+present/late/absent windows. This covers registering students in class before the
+reader was running. A real tap always takes priority. The report lists these
+students (`N student(s) had no tap but registered a card this date…`). Point
+elsewhere with `--registration-log PATH`. A missing file is fine (nothing is
+credited).
+
+**Canvas export quirks handled.** Some exports have an extra posting-policy row
+(`Manual Posting`) between the header and `Points Possible`. That's detected
+automatically. Student rows are still recognized by an `@` in `SIS Login ID`.
+
+---
+
+## Step 7 — Recovering a log whose clock never synced
+
+If WiFi/NTP never connected, every row in `attendance.csv` is
+`unsynced-<millis-since-boot>,token` and Step 6 scores no one (the report shows
+them all as unsynced). `recover_sessions.py` gives those rows real dates:
+
+1. **List the sessions.** Each power-on of the reader is one session (millis reset
+   to ~0 at boot). Run it once without `--map`. It prints one line per session:
+   ```bash
+   python3 recover_sessions.py attendance.csv --out /dev/null
+   ```
+   ```
+   session 5: 64 taps, 63 cards, lines 126-189, 37 min span  (unmapped)
+   session 6: 1 taps, 1 cards, lines 190-190, 0 min span  (unmapped)
+   session 9: 8 taps, 1 cards, lines 324-331, 2 min span, synced 2026-09-11 11:53:27 .. …
+   ```
+   A ~class-sized session lasting about a class period is a real class. A handful
+   of taps from one card is a test.
+   Rows with truncated tokens or garbled timestamps (from a torn SD write) are
+   reported on stderr and dropped.
+2. **Work out which date each session was.** Use the number of taps, who tapped,
+   any nearby synced timestamps, and your class calendar. Power-ons that were just
+   testing can simply be left unmapped.
+3. **Map and write:**
+   ```bash
+   python3 recover_sessions.py attendance.csv \
+       --map 5=2026-08-28 --map 7=2026-09-08 \
+       --out attendance_recovered.csv
+   ```
+   It prints who was present on each recovered date. Synced rows are kept as-is,
+   and unsynced rows in unmapped sessions are dropped.
+4. **Grade each recovered date with `--start 00:00`.** A recovered tap's time of
+   day is the time since that session's **first tap** (first tap = `00:00:00`).
+   That assumes the reader was switched on at about class start:
+   ```bash
+   python3 build_gradebook.py --canvas Grades.csv --attendance attendance_recovered.csv \
+       --date 2026-08-28 --start 00:00 --late-after 10 --close 30 --column "Aug 28 Activity"
+   ```
+   If the reader was switched on well before class, late/absent cutoffs will be
+   off by that much. Sanity-check the printed lists before importing.
+
+`attendance_recovered.csv` contains tokens only, but it's still student attendance
+data. It's gitignored, like the other logs.
+
 ---
 
 ## Quick command reference
 
-| Task | Command (run from `software/`) |
-|------|--------------------------------|
-| Generate/inspect key | `python3 attendance_crypto.py` |
-| Register cards | `python3 register_cards.py` |
-| See what the USB reader types | `python3 reader_test.py` |
-| List serial ports | `ls /dev/cu.*` |
-| Download attendance log | `python3 sd_download.py` |
-| Count logged rows | `python3 sd_download.py --cmd count` |
-| Decode log → names | `python3 decode_attendance.py` |
-| Build gradebook | `python3 build_gradebook.py --canvas … --date … --start … --column …` |
+**Host** = run on the Mac in the host venv (`source path/to/venv/bin/activate`,
+Step 0), or through the serial bridge.
+
+| Task | Command (run from `software/`) | Where |
+|------|--------------------------------|-------|
+| Generate/inspect key | `python3 attendance_crypto.py` | anywhere |
+| Flash firmware | `../firmware/flash.sh` (`-n` = compile only) | host (compile: anywhere) |
+| Register cards | `python3 register_cards.py` | anywhere (container: noVNC, port 6080) |
+| See what the USB reader types | `python3 reader_test.py` | host |
+| List serial ports | `ls /dev/cu.*` | host |
+| Push roster to device | `python3 sd_upload.py roster.csv` | host |
+| Download attendance log | `python3 sd_download.py` | host |
+| Count logged rows | `python3 sd_download.py --cmd count` | host |
+| Decode log → names | `python3 decode_attendance.py` | anywhere |
+| Build gradebook | `python3 build_gradebook.py --canvas … --date … --start … --column …` | anywhere |
+| Date an unsynced log | `python3 recover_sessions.py attendance.csv --map N=YYYY-MM-DD` | anywhere |
 
 Device serial commands (in Serial Monitor): `dump` · `roster` · `count` · `help`.
 
@@ -248,7 +399,16 @@ Device serial commands (in Serial Monitor): `dump` · `roster` · `count` · `he
 
 ## Known limitation: classroom WiFi for NTP
 
-Enterprise WiFi (eduroam and similar campus networks) needs more than
-`WiFi.begin(ssid, pass)`, so the clock may not sync on those networks. Options:
-a phone hotspot for the first minute (just to set the clock), a network that
-accepts a simple SSID, or accept `unsynced` rows and set the date manually.
+**Status: not yet working in class.** Enterprise WiFi (eduroam and similar campus
+networks) needs more than `WiFi.begin(ssid, pass)`, so the clock may not sync on
+those networks. Options:
+
+- A **phone hotspot** for the first minute (just to set the clock). On an iPhone,
+  turn on *Personal Hotspot → Maximize Compatibility*: the ESP32 only has a
+  2.4 GHz radio and won't see a 5 GHz-only hotspot. Put the hotspot's exact name
+  in `WIFI_SSID`.
+- A network that accepts a plain SSID + password.
+- Accept `unsynced` rows and date them afterwards with `recover_sessions.py`
+  (Step 7).
+
+The serial diagnostics described in Step 2a show exactly which case you're in.

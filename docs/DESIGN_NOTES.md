@@ -72,6 +72,12 @@ constrained device's output.
   set the clock via NTP** (`configTzTime`, TZ = US Eastern). Each tap logs a real local
   `timestamp,token`; before the clock syncs, rows are logged `unsynced-<millis>` and the
   gradebook script skips/flags them.
+- **WiFi bring-up diagnostics (temporary).** Because the classroom WiFi hasn't
+  connected yet, the sketch has a `DEBUG` block (`wifiScanReport()` at boot,
+  `wifiDiagTick()` in `loop()`) that prints visible networks and the WiFi/NTP status
+  over serial. The ESP32 is **2.4 GHz only**, so a 5 GHz-only network or an iPhone
+  hotspot without *Maximize Compatibility* shows as `NO_SSID_AVAIL`. Remove the block
+  once WiFi works.
 - **Two different CSV files, don't confuse them:** `roster.csv` (the id/token → name
   lookup you build) vs `attendance.csv` (the log the device writes). Editing the wrong
   one is an easy mistake — names come from **roster.csv**.
@@ -225,6 +231,49 @@ Matching order per tapped name: (1) `aliases.csv` → SIS Login ID, (2) exact no
 name, (3) unique subset match (handles middle initials), else reported as unmatched or
 ambiguous. Taps after `--close` are scored absent (0). Run it per session with `--date`,
 `--start`, `--column`, and the late-window flags.
+
+**Registration counts as a tap (added after first classroom use).** Students were
+registered in class before the reader was set up, so they never tapped and were
+marked absent. `roster.csv` can't say when a card was registered: it's rewritten in
+full, sorted, on every save. So `register_cards.py` now appends
+`timestamp,token` to `registration_log.csv` for each *new* card (not updates), and
+`build_gradebook.py --registration-log` uses a same-day registration as the tap time
+**only when the student has no real tap**. It still goes through the normal
+present/late/absent windows, and the report lists who was credited. The log holds only
+tokens, the same as `attendance.csv`.
+
+**Canvas header quirk.** Some exports insert a posting-policy row (`Manual Posting`)
+between the header and `Points Possible`. The script now finds `Points Possible` by
+its label (falling back to row 2) instead of by position. Student rows are still
+"has an `@` in SIS Login ID" (see ROADMAP).
+
+**Card taps in the AndrewID box.** The wedge reader types wherever focus is, so a
+second tap during the AndrewID prompt used to save the card number as the AndrewID.
+All-digit input is now rejected: every AndrewID has a letter.
+
+---
+
+## 7a. Recovering logs whose clock never synced
+
+In practice the reader has run whole class sessions without NTP, so every row is
+`unsynced-<millis since boot>`. `software/recover_sessions.py` turns those back into
+dated rows:
+
+- **Session = one power-on.** Boot resets `millis` to ~0 and drops the synced clock,
+  so a boundary is `millis` going backwards, or a real timestamp followed by an
+  `unsynced-` row. (Unsynced→synced is *not* a boundary: NTP arriving mid-run doesn't
+  reset `millis`.)
+- **Dates are supplied by hand** (`--map N=YYYY-MM-DD`). The script prints one line per
+  session (taps, distinct cards, span, any synced timestamps) to help. Session size and
+  duration make real classes obvious next to one-card test runs.
+- **Time of day = time since the session's first tap.** The first tap becomes `00:00:00`
+  and the gradebook is run with `--start 00:00`. This assumes the reader was switched on
+  at about class start. On the one day we could check (2026-08-28), the reboot that
+  started class landed within ~5 min of the last synced timestamp. If it's switched on
+  early, lateness shifts by that amount.
+- **Torn SD writes.** Real logs contained a NUL-padded timestamp and truncated tokens.
+  Those rows are reported and dropped. A garbled timestamp would otherwise read as
+  "synced" and falsely split a session.
 
 ---
 

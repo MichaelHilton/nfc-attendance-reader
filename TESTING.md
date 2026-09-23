@@ -22,6 +22,14 @@ python3 -m venv .venv
 plus `pytest` and `pytest-cov`. A repo-root `.venv/` is used because the system
 Python is externally managed (PEP 668); it is gitignored.
 
+**In the dev container**, skip the venv: `postCreateCommand` already installed
+`requirements-dev.txt` into the container's Python, so run `python3 -m pytest`
+(use it wherever this page says `.venv/bin/pytest`). A `.venv/` created on the Mac
+holds macOS binaries and fails inside the container with
+`cannot execute: required file not found`. That's expected, so leave it for the
+host. (The separate `software/path/to/venv` is the host's *runtime* venv for the
+serial tools. See `docs/TESTING_GUIDE.md` Step 0.)
+
 Once the venv exists, just:
 
 ```bash
@@ -120,8 +128,8 @@ Canvas CSV rewrite. `main()` was split into `parse_args` / `build() -> Result` /
 |---|---|
 | `test_gradebook_helpers.py` | Pure helpers: `norm_tokens` (order/case/punctuation independence), `fmt_points` (integer vs fraction formatting), `col_label` (stripping the trailing `(id)`), and the roster/alias loaders. |
 | `test_gradebook_matching.py` | `match_row` against a tiny `CanvasIndex`: alias → SIS Login ID, exact normalized match, ambiguous (two students, same name), subset/superset "approx" match for middle initials, and the no-match case. |
-| `test_gradebook_scoring.py` | `score_tap` tier boundaries (inclusive), tapped-before-start, `late_frac` points, earliest-tap-of-the-day wins, and multiple cards for one student keeping the best status. |
-| `test_gradebook_columns.py` | Resolving `--column` (exact label vs substring, zero/ambiguous → exit) and reading `Points Possible` (missing / non-numeric → default 1.0 with a warning). |
+| `test_gradebook_scoring.py` | `score_tap` tier boundaries (inclusive), tapped-before-start, `late_frac` points, earliest-tap-of-the-day wins, and multiple cards for one student keeping the best status. Registration-log crediting: a same-day registration with no tap is scored from its time (present or late), other dates are ignored, a real tap always wins, and a missing log is tolerated. |
+| `test_gradebook_columns.py` | Resolving `--column` (exact label vs substring, zero/ambiguous → exit) and reading `Points Possible` (missing / non-numeric → default 1.0 with a warning), including an export with an extra `Manual Posting` row before `Points Possible`. |
 | `test_gradebook_output.py` | Output integrity: only the target column changes, row count preserved, short rows padded; date filtering (`unsynced-*` counted not scored, wrong-date and malformed timestamps skipped); every report branch; `build()`'s `SystemExit` guards. |
 | `test_gradebook_cli.py` | The thin CLI wrapper: `parse_args` defaults, `main(argv)` happy path, the Points-Possible warning print, missing-file exit, default output path. |
 
@@ -130,7 +138,8 @@ Canvas CSV rewrite. `main()` was split into `parse_args` / `build() -> Result` /
 | File | Goal |
 |---|---|
 | `test_decode.py` | `software/decode_attendance.py`: `find_token_column`, `read_attendance` for both input formats (device `millis,token` and a sheet export with a `token` header) including the `time_col` selection edge, `token_to_name` decrypt/failure handling, and the extracted `decode()` / `main()`. |
-| `test_register_core.py` | `software/register_cards.py` roster core (the tkinter GUI is out of scope): `normalize_key` (digit-strip, zero-pad, mod 2³² wrap), `load_roster`/`save_roster` round-trip (sorted, header, 32-char filter), `upsert` (added vs updated, returns previous value, count). |
+| `test_register_core.py` | `software/register_cards.py` roster core (the tkinter GUI is out of scope): `normalize_key` (digit-strip, zero-pad, mod 2³² wrap), `valid_andrew_id` length bounds, `looks_like_card_scan` (an all-digit entry is a card tap, not an AndrewID), `load_roster`/`save_roster` round-trip (sorted, header, 32-char filter), `upsert` (added vs updated, returns previous value, count), and the `registration_log.csv` writer (sits beside the roster, header once, append-only). |
+| `test_recover_sessions.py` | `software/recover_sessions.py`: `read_rows` drops truncated tokens, garbled (NUL-padded) timestamps and empty tokens, and skips the legacy 3-column format. `sessionize` splits on a millis reset or synced→unsynced, but not unsynced→synced, and a garbled row can't fracture a session. Also covers `describe_session` summaries, `parse_map` validation, and a `main()` run that checks the rewritten timestamps, the kept/dropped rows, and the per-date attendee report. |
 | `test_sd_download.py` | `software/sd_download.py` parsers split out of the serial loop: `parse_dump` (between `<<<BEGIN>>>`/`<<<END>>>` markers), `parse_count`, and `find_port` matching rules. The serial I/O itself is `# pragma: no cover`. |
 | `test_sd_upload.py` | `software/sd_upload.py` framing helpers split out of the serial loop: `checksum` (32-bit wrap), `build_header` (`<length> <checksum>`), `find_marker`, and `parse_result` (`<<<OK>>>`/`<<<ERR>>>` reply). The serial I/O itself is `# pragma: no cover`. |
 
@@ -160,8 +169,10 @@ Canvas CSV rewrite. `main()` was split into `parse_args` / `build() -> Result` /
 
 `pytest --cov` measures `software/` (see `.coveragerc`). `run_gui`, `__main__`
 blocks, and serial I/O are excluded. The gate is **95%**; the suite currently
-sits at ~99% (`build_gradebook`, `decode_attendance`, `register_cards`,
-`sd_download` at 100%, `attendance_crypto` at 96%).
+sits at ~98% (`decode_attendance`, `register_cards`, `sd_download`, `sd_upload`
+at 100%; `build_gradebook` and `recover_sessions` at 98%; `attendance_crypto` at
+96%). A new script without tests can push the total under the gate on its own,
+so add its tests in the same change.
 
 ```bash
 .venv/bin/pytest --cov --cov-report=term-missing   # per-line misses
