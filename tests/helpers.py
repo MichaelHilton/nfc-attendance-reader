@@ -52,12 +52,14 @@ def canvas_rows(students, *, header=CANVAS_HEADER, points=POINTS_ROW):
     return rows
 
 
-def make_files(tmp_path, *, canvas, registrations, taps, aliases=None, key=KAT_KEY):
-    """Write canvas/roster/attendance(/aliases) CSVs; return their paths.
+def make_files(tmp_path, *, canvas, registrations, taps, aliases=None,
+               registration_log=None, key=KAT_KEY):
+    """Write canvas/roster/attendance(/aliases/registration_log) CSVs; return their paths.
 
-    registrations: {card_id: typed_name}
-    taps:          list of [timestamp, token]  (use helpers.tok(card_id))
-    aliases:       list of [typed_name, sis_login_id] or None
+    registrations:     {card_id: typed_name}
+    taps:               list of [timestamp, token]  (use helpers.tok(card_id))
+    aliases:            list of [typed_name, sis_login_id] or None
+    registration_log:   list of [timestamp, token] or None
     """
     d = pathlib.Path(tmp_path)
     _csv(d / "canvas.csv", canvas)
@@ -72,9 +74,15 @@ def make_files(tmp_path, *, canvas, registrations, taps, aliases=None, key=KAT_K
     if aliases is not None:
         _csv(aliases_path, [["typed_name", "sis_login_id"]] + aliases)
 
+    reg_log_path = d / "registration_log.csv"
+    if registration_log is not None:
+        _csv(reg_log_path, [["timestamp", "token"]] + registration_log)
+
     return {
         "canvas": str(d / "canvas.csv"),
         "roster": str(d / "roster.csv"),
         "attendance": str(d / "attendance.csv"),
         "aliases": str(aliases_path) if aliases is not None else str(d / "missing.csv"),
+        "registration_log": str(reg_log_path) if registration_log is not None
+                            else str(d / "missing_reg_log.csv"),
     }

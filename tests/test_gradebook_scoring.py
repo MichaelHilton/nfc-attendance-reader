@@ -89,3 +89,77 @@ def test_multiple_cards_one_student_keeps_best_status(tmp_path):
                  bg.Session("2026-08-27", "10:00", 10.0, 30.0, 0.5, "Wk1 Activity"))
     assert (r.present, r.late, r.absent) == (1, 0, 0)
     assert r.rows[2][-1] == "2"
+
+
+# ------------------------- registration-log crediting -------------------------
+def _run_with_reg_log(tmp_path, taps, registration_log, **session_kw):
+    files = helpers.make_files(
+        tmp_path,
+        canvas=helpers.canvas_rows([
+            ("Chen, Alice", "alice@x.edu"),
+            ("Diaz, Bob", "bob@x.edu"),
+        ]),
+        registrations={"0000000001": "Alice Chen", "0000000002": "Bob Diaz"},
+        taps=taps,
+        registration_log=registration_log,
+    )
+    kw = dict(date="2026-08-27", start="10:00", late_after=10.0, close=30.0,
+              late_frac=0.5, column="Wk1 Activity")
+    kw.update(session_kw)
+    return bg.build(files["canvas"], files["attendance"], files["roster"],
+                    files["aliases"], helpers.KAT_KEY, bg.Session(**kw),
+                    registration_path=files["registration_log"])
+
+
+def test_registered_but_never_tapped_is_credited_present(tmp_path):
+    # Alice registered her card mid-class but the reader never logged a tap.
+    r = _run_with_reg_log(
+        tmp_path, taps=[],
+        registration_log=[["2026-08-27 10:05:00", helpers.tok("0000000001")]],
+    )
+    assert (r.present, r.late, r.absent) == (1, 0, 1)   # Bob still absent
+    assert r.credited_registrations == ["Alice Chen"]
+
+
+def test_registration_credit_still_scored_by_time(tmp_path):
+    # Registered late enough that it lands in the "late" tier, not an automatic present.
+    r = _run_with_reg_log(
+        tmp_path, taps=[],
+        registration_log=[["2026-08-27 10:20:00", helpers.tok("0000000001")]],
+    )
+    assert (r.present, r.late) == (0, 1)
+
+
+def test_registration_on_a_different_date_is_ignored(tmp_path):
+    r = _run_with_reg_log(
+        tmp_path, taps=[],
+        registration_log=[["2026-09-03 10:05:00", helpers.tok("0000000001")]],
+    )
+    assert r.credited_registrations == []
+    assert r.absent == 2
+
+
+def test_real_tap_wins_over_registration_time(tmp_path):
+    # A same-day registration must never override an actual tap's time.
+    r = _run_with_reg_log(
+        tmp_path,
+        taps=[["2026-08-27 10:25:00", helpers.tok("0000000001")]],   # late-tier tap
+        registration_log=[["2026-08-27 10:01:00", helpers.tok("0000000001")]],  # earlier "present" time
+    )
+    assert (r.present, r.late) == (0, 1)          # the real tap's time is used, not registration's
+    assert r.credited_registrations == []          # not "credited": a real tap already existed
+
+
+def test_missing_registration_log_is_tolerated(tmp_path):
+    files = helpers.make_files(
+        tmp_path,
+        canvas=helpers.canvas_rows([("Chen, Alice", "alice@x.edu")]),
+        registrations={"0000000001": "Alice Chen"},
+        taps=[],
+    )
+    r = bg.build(files["canvas"], files["attendance"], files["roster"],
+                 files["aliases"], helpers.KAT_KEY,
+                 bg.Session("2026-08-27", "10:00", 10.0, 30.0, 0.5, "Wk1 Activity"),
+                 registration_path=str(tmp_path) + "/does_not_exist.csv")
+    assert r.credited_registrations == []
+    assert r.absent == 1

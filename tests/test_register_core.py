@@ -124,3 +124,27 @@ def test_upsert_preserves_other_entries_and_counts(tmp_path):
     (_, _), count = rc.upsert(p, TOK_B, "enc-b")
     assert count == 2
     assert rc.load_roster(p) == {TOK_A: "enc-a", TOK_B: "enc-b"}
+
+
+# ------------------------- registration log ---------------------------
+def test_registration_log_path_sits_beside_roster():
+    assert rc.registration_log_path("/x/y/roster.csv") == "/x/y/registration_log.csv"
+    assert rc.registration_log_path("roster.csv") == "./registration_log.csv"
+
+
+def test_log_registration_creates_file_with_header(tmp_path):
+    p = str(tmp_path / "registration_log.csv")
+    rc.log_registration(p, TOK_A)
+    rows = list(csv.reader(open(p, newline="", encoding="utf-8")))
+    assert rows[0] == ["timestamp", "token"]
+    assert len(rows) == 2
+    assert rows[1][1] == TOK_A
+
+
+def test_log_registration_appends_without_rewriting_header(tmp_path):
+    p = str(tmp_path / "registration_log.csv")
+    rc.log_registration(p, TOK_A)
+    rc.log_registration(p, TOK_B)
+    rows = list(csv.reader(open(p, newline="", encoding="utf-8")))
+    assert rows[0] == ["timestamp", "token"]
+    assert [r[1] for r in rows[1:]] == [TOK_A, TOK_B]

@@ -16,6 +16,11 @@ Inputs
   --roster     encrypted roster 'token,enc' (default roster.csv)
   --key        secret.key (default secret.key)
   --aliases    name/ID fixups 'typed_value,sis_login_id' (default aliases.csv, optional)
+  --registration-log
+               registration_log.csv 'timestamp,token' (default registration_log.csv,
+               optional). A student who registered a card that day but never tapped
+               (reader wasn't set up yet, e.g.) is credited as present/late from
+               their registration time instead of being marked absent.
 Session
   --date       session date YYYY-MM-DD (required)
   --start      class start HH:MM 24h (required)
@@ -198,6 +203,28 @@ def read_earliest_taps(path, date):
     return earliest, unsynced
 
 
+def read_earliest_registrations(path, date):
+    """{token: earliest registration datetime on `date`} from registration_log.csv.
+    Missing file -> {} (the log is optional; older rosters predate it)."""
+    earliest = {}
+    if not path or not os.path.exists(path):
+        return earliest
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if not row or len(row) < 2:
+                continue
+            ts, tok = row[0].strip(), row[1].strip()
+            if len(tok) != 32 or not ts.startswith(date):
+                continue
+            try:
+                dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if tok not in earliest or dt < earliest[tok]:
+                earliest[tok] = dt
+    return earliest
+
+
 # ------------------------------- matching ------------------------------
 def match_row(index, value, aliases):
     """Map a tapped value (an AndrewID, or a typed name from an older roster) to a
@@ -265,10 +292,12 @@ class Result:
     ambiguous: list = field(default_factory=list)
     unregistered: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
+    credited_registrations: list = field(default_factory=list)
 
 
 # --------------------------------- build --------------------------------
-def build(canvas_path, attendance_path, roster_path, aliases_path, K, session):
+def build(canvas_path, attendance_path, roster_path, aliases_path, K, session,
+          registration_path=None):
     """Do everything except argument parsing and printing. Raises SystemExit on
     bad input, exactly as the script always has."""
     try:
@@ -285,6 +314,12 @@ def build(canvas_path, attendance_path, roster_path, aliases_path, K, session):
     late_pts = round(full_pts * session.late_frac, 4)
 
     earliest, unsynced = read_earliest_taps(attendance_path, session.date)
+
+    credited_registrations = []
+    for tok, dt in read_earliest_registrations(registration_path, session.date).items():
+        if tok not in earliest:              # only fills gaps; a real tap always wins
+            earliest[tok] = dt
+            credited_registrations.append(tok)
 
     row_status = {}          # canvas row idx -> ("present"|"late"|"absent", value)
     unregistered, unmatched, ambiguous = [], [], []
@@ -322,6 +357,7 @@ def build(canvas_path, attendance_path, roster_path, aliases_path, K, session):
         aliases_path=aliases_path,
         unmatched=unmatched, ambiguous=ambiguous, unregistered=unregistered,
         warnings=[warning] if warning else [],
+        credited_registrations=[token_id.get(t, t[:8]) for t in credited_registrations],
     )
 
 
@@ -357,6 +393,10 @@ def render_report(result, session, out_path):
     if r.unregistered:
         lines.append(f"! {len(r.unregistered)} tap(s) from cards not in the roster (unregistered): "
                      + ", ".join(r.unregistered))
+    if r.credited_registrations:
+        lines.append(f"! {len(r.credited_registrations)} student(s) had no tap but registered "
+                     f"a card this date; counted present/late from registration time: "
+                     + ", ".join(sorted(r.credited_registrations)))
     lines.append(f"\nWrote {out_path}  (import into Canvas; only '{r.target_header}' was changed)")
     return "\n".join(lines)
 
@@ -369,6 +409,7 @@ def parse_args(argv=None):
     ap.add_argument("--roster", default="roster.csv")
     ap.add_argument("--key", default="secret.key")
     ap.add_argument("--aliases", default="aliases.csv")
+    ap.add_argument("--registration-log", default="registration_log.csv")
     ap.add_argument("--date", required=True, help="YYYY-MM-DD")
     ap.add_argument("--start", required=True, help="HH:MM (24h)")
     ap.add_argument("--late-after", type=float, default=10.0)
@@ -388,7 +429,8 @@ def main(argv=None):
     K = ac.load_or_create_key(a.key)
     session = Session(a.date, a.start, a.late_after, a.close, a.late_frac, a.column)
 
-    result = build(a.canvas, a.attendance, a.roster, a.aliases, K, session)
+    result = build(a.canvas, a.attendance, a.roster, a.aliases, K, session,
+                   registration_path=a.registration_log)
     for w in result.warnings:
         print(w)
 

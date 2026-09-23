@@ -22,6 +22,7 @@ Run:
 Esc quits, F11 toggles full screen.
 """
 import csv, os, sys, re
+from datetime import datetime
 import attendance_crypto as ac
 
 # ----------------------------- roster core (testable) -----------------------------
@@ -78,6 +79,25 @@ def upsert(path: str, token: str, enc: str):
     roster[token] = enc
     save_roster(path, roster)
     return (("updated", prev) if prev is not None else ("added", None)), len(roster)
+
+
+def registration_log_path(roster_path: str) -> str:
+    return os.path.join(os.path.dirname(roster_path) or ".", "registration_log.csv")
+
+
+def log_registration(log_path: str, token: str) -> None:
+    """Append (timestamp, token) for a brand-new registration.
+
+    roster.csv itself is a full rewrite on every save (sorted by token, no
+    history), so without this there is no record of *when* a card was first
+    registered -- which matters when registering stands in for a swipe.
+    """
+    is_new = not os.path.exists(log_path)
+    with open(log_path, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if is_new:
+            w.writerow(["timestamp", "token"])
+        w.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), token])
 
 # ----------------------------------- GUI ------------------------------------------
 def run_gui(path: str, key_path: str):
@@ -164,6 +184,8 @@ def run_gui(path: str, key_path: str):
             enc = ac.encrypt_name(K, andrew_id)
             (action, prev), total = upsert(path, state["token"], enc)
             nonlocal count; count = total
+            if action == "added":
+                log_registration(registration_log_path(path), state["token"])
             if action == "updated" and prev:
                 try: pn = ac.decrypt_name(K, prev)
                 except Exception: pn = ""
