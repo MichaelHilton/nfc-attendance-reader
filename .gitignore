@@ -12,17 +12,27 @@ wifi_config.h
 
 # Student / institution data — real rosters, logs, and Canvas exports
 software/roster.csv
+software/registration_log.csv
 software/attendance.csv
+software/attendance2.csv
+software/attendance_recovered.csv
+software/attendance_recovered_report.csv
+software/attendance_by_student.csv
 software/*_decoded.csv
 software/*_filled.csv
 software/aliases.csv
 software/Grades*.csv
+software/*Grades*.csv
+/attendance.csv
 
 # Python
 __pycache__/
 *.pyc
 .venv/
 software/.venv/
+# Host-side venv (software/path/to/venv) for commands that must run outside the
+# dev container -- see docs/TESTING_GUIDE.md
+software/path/
 .pytest_cache/
 .coverage
 htmlcov/
