@@ -31,6 +31,17 @@ def valid_andrew_id(s: str) -> bool:
     """An AndrewID is 2-8 characters long."""
     return ANDREW_ID_MIN <= len(s or "") <= ANDREW_ID_MAX
 
+def looks_like_card_scan(s: str) -> bool:
+    """True if s is a bare digit string -- what the reader types on a tap.
+
+    A real AndrewID always has at least one letter. If the AndrewID prompt
+    is on screen and the student taps their card again (e.g. the first tap
+    "didn't seem to register"), the reader types the card number + Enter
+    right into that box; without this check it gets saved as their AndrewID.
+    """
+    s = s or ""
+    return s.isdigit()
+
 def normalize_key(raw: str) -> str:
     """Whatever the reader typed -> the device's exact id format (10-digit decimal)."""
     digits = re.sub(r"\D", "", raw or "")
@@ -145,6 +156,9 @@ def run_gui(path: str, key_path: str):
             show("andrewid")
         elif state["mode"] == "andrewid":
             andrew_id = raw.strip()
+            if looks_like_card_scan(andrew_id):
+                entry.delete(0, tk.END)
+                small.config(text="That's a card tap, not an AndrewID — type your AndrewID"); return
             if not valid_andrew_id(andrew_id):
                 small.config(text=f"AndrewID must be {ANDREW_ID_MIN}-{ANDREW_ID_MAX} characters"); return
             enc = ac.encrypt_name(K, andrew_id)

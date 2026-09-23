@@ -56,6 +56,22 @@ def test_valid_andrew_id(andrew_id, ok):
     assert rc.valid_andrew_id(andrew_id) is ok
 
 
+# ------------------------- looks_like_card_scan -----------------------
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("0984257796", True),      # full card scan
+        ("1234", True),            # short numeric scan, would pass valid_andrew_id's length check
+        ("mhilton", False),        # real AndrewID
+        ("mhilton1", False),       # real AndrewID with a digit
+        ("", False),
+        (None, False),
+    ],
+)
+def test_looks_like_card_scan(raw, expected):
+    assert rc.looks_like_card_scan(raw) is expected
+
+
 # ------------------------ load_roster / save_roster ------------------
 def test_load_roster_missing_file_is_empty(tmp_path):
     assert rc.load_roster(str(tmp_path / "roster.csv")) == {}
