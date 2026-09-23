@@ -7,9 +7,10 @@ synced (WiFi/NTP failed after setup), so every tap was logged as
 A "session" = one power-on run of the reader: a boot resets millis to ~0 and
 drops the synced clock, so a session boundary is either millis going backwards
 or the log flipping from a real timestamp back to 'unsynced-N'. This script
-finds those boundaries, then applies a session-number -> date mapping you
-supply (figured out by hand from session size / which students appear /
-nearby synced timestamps -- see `sessionize` output).
+finds those boundaries, prints one summary line per session, then applies a
+session-number -> date mapping you supply (figured out by hand from session
+size / which students appear / nearby synced timestamps -- run once without
+--map to see the session list).
 
 Within a mapped session, each tap's time-of-day is reconstructed as the
 elapsed time since that session's FIRST tap (00:00:00 = first tap). That
@@ -88,6 +89,20 @@ def sessionize(rows):
     return sessions
 
 
+def describe_session(n, sess, date=None):
+    """One summary line per session, for choosing the --map dates: its size,
+    distinct cards, how long it ran, and any real timestamps it contains."""
+    millis = [m for _, _, _, kind, m in sess if kind == "unsynced" and m is not None]
+    synced = [ts for _, ts, _, kind, _ in sess if kind == "synced"]
+    cards = len({tok for _, _, tok, _, _ in sess})
+    line = f"session {n}: {len(sess)} taps, {cards} cards, lines {sess[0][0]}-{sess[-1][0]}"
+    if millis:
+        line += f", {(max(millis) - min(millis)) / 60000:.0f} min span"
+    if synced:
+        line += f", synced {synced[0]} .. {synced[-1]}"
+    return line + (f"  -> {date}" if date else "  (unmapped)")
+
+
 def parse_map(pairs):
     out = {}
     for p in pairs:
@@ -110,6 +125,10 @@ def main(argv=None):
     session_dates = parse_map(a.map)
     rows = list(read_rows(a.attendance))
     sessions = sessionize(rows)
+
+    for i, sess in enumerate(sessions, start=1):
+        print(describe_session(i, sess, session_dates.get(i)))
+    print()
 
     K = ac.load_or_create_key(a.key)
     names = {}

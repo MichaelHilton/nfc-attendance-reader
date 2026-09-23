@@ -98,6 +98,22 @@ def test_read_rows_skips_empty_token(tmp_path):
     assert list(rs.read_rows(path)) == [(2, "unsynced-600", TOK_A)]
 
 
+# ---------------------------- describe_session ----------------------------
+def test_describe_session_unsynced_span_and_cards():
+    sess = [(3, "unsynced-0", TOK_A, "unsynced", 0),
+            (4, "unsynced-600000", TOK_B, "unsynced", 600000)]
+    assert rs.describe_session(2, sess) == \
+        "session 2: 2 taps, 2 cards, lines 3-4, 10 min span  (unmapped)"
+
+
+def test_describe_session_shows_synced_range_and_mapped_date():
+    sess = [(1, "2026-08-27 10:00:00", TOK_A, "synced", None),
+            (2, "2026-08-27 10:05:00", TOK_A, "synced", None)]
+    assert rs.describe_session(1, sess, "2026-08-27") == (
+        "session 1: 2 taps, 1 cards, lines 1-2, "
+        "synced 2026-08-27 10:00:00 .. 2026-08-27 10:05:00  -> 2026-08-27")
+
+
 # ------------------------------- parse_map -------------------------------
 def test_parse_map_builds_session_to_date_dict():
     assert rs.parse_map(["1=2026-08-28", "3=2026-09-08"]) == {1: "2026-08-28", 3: "2026-09-08"}
@@ -140,6 +156,8 @@ def test_main_end_to_end(tmp_path, capsys):
         ["2026-08-28 10:30:00", bob],
     ]
     report = capsys.readouterr().out
+    assert "session 1: 1 taps" in report and "session 2: 1 taps" in report
+    assert "session 3: 4 taps, 3 cards, lines 3-6, 2 min span, synced 2026-08-28 10:30:00" in report
     assert "=== 2026-08-28  (3 present) ===" in report
     assert "alice" in report and "(could not decrypt)" in report
     assert f"UNREGISTERED {stranger[:8]}" in report
