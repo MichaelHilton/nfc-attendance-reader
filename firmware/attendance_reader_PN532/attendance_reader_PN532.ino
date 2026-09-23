@@ -179,6 +179,80 @@ void drawTopBar(bool force = false) {
   }
 }
 
+// ---------------------- WiFi serial diagnostics (DEBUG) -------------------
+// Temporary bring-up aid: prints to USB serial why WiFi is / isn't connecting.
+// Watch with:  arduino-cli monitor -p <port> -c baudrate=115200
+// Remove this block (and its two call sites) once WiFi is confirmed working.
+static const char* wlStatusStr(int s) {
+  switch (s) {
+    case WL_IDLE_STATUS:     return "IDLE";
+    case WL_NO_SSID_AVAIL:   return "NO_SSID_AVAIL (network not seen)";
+    case WL_SCAN_COMPLETED:  return "SCAN_COMPLETED";
+    case WL_CONNECTED:       return "CONNECTED";
+    case WL_CONNECT_FAILED:  return "CONNECT_FAILED (wrong password?)";
+    case WL_CONNECTION_LOST:  return "CONNECTION_LOST";
+    case WL_DISCONNECTED:    return "DISCONNECTED";
+    default:                 return "UNKNOWN";
+  }
+}
+
+// One synchronous scan before WiFi.begin(): shows every 2.4 GHz AP the ESP32
+// can actually see, and whether our target SSID is among them.
+void wifiScanReport() {
+  Serial.printf("[wifi] target SSID=\"%s\"  pass length=%d\n",
+                WIFI_SSID, (int)strlen(WIFI_PASS));
+  Serial.println("[wifi] scanning 2.4 GHz...");
+  int n = WiFi.scanNetworks();
+  if (n <= 0) {
+    Serial.println("[wifi] scan saw NO networks (2.4 GHz radio/antenna problem?)");
+    return;
+  }
+  bool sawTarget = false;
+  for (int i = 0; i < n; i++) {
+    bool match = (WiFi.SSID(i) == WIFI_SSID);
+    sawTarget |= match;
+    Serial.printf("[wifi]  %2d) %-32s  RSSI %4d  ch %2d  %s%s\n",
+                  i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i),
+                  (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "open" : "secured",
+                  match ? "   <-- MATCH" : "");
+  }
+  if (!sawTarget)
+    Serial.printf("[wifi] *** \"%s\" NOT in scan. Check the exact iPhone name and "
+                  "turn ON Personal Hotspot > Maximize Compatibility. ***\n", WIFI_SSID);
+  WiFi.scanDelete();
+}
+
+// Call every loop(): rate-limited progress report until WiFi + NTP are up.
+void wifiDiagTick() {
+  static unsigned long last = 0;
+  static bool wasConnected = false, ntpDone = false;
+  if (millis() - last < 2000) return;
+  last = millis();
+
+  int st = WiFi.status();
+  if (st != WL_CONNECTED) {
+    wasConnected = false;
+    Serial.printf("[wifi] status=%s\n", wlStatusStr(st));
+    return;
+  }
+  if (!wasConnected) {
+    Serial.printf("[wifi] CONNECTED  ip=%s  gw=%s  rssi=%d dBm\n",
+                  WiFi.localIP().toString().c_str(),
+                  WiFi.gatewayIP().toString().c_str(), WiFi.RSSI());
+    wasConnected = true;
+  }
+  if (!ntpDone) {
+    struct tm t;
+    if (getLocalTime(&t, 0) && (t.tm_year + 1900) >= 2024) {
+      char ts[24]; strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
+      Serial.printf("[ntp]  clock set: %s\n", ts);
+      ntpDone = true;
+    } else {
+      Serial.println("[ntp]  connected, waiting for NTP...");
+    }
+  }
+}
+
 // ------------------------------- roster -------------------------------------
 void loadRoster() {
   rCount = 0;
@@ -364,6 +438,7 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
+  wifiScanReport();                          // DEBUG: list visible APs, flag if target missing
   WiFi.begin(WIFI_SSID, WIFI_PASS);          // connects in the background (for NTP only)
   configTzTime(TZ_INFO, NTP1, NTP2);         // set the clock over NTP once WiFi is up
 
@@ -381,6 +456,7 @@ void setup() {
 // --------------------------------- loop -------------------------------------
 void loop() {
   handleSerial();                            // USB commands: dump the SD files, etc.
+  wifiDiagTick();                            // DEBUG: report WiFi/NTP progress over serial
 
   static unsigned long lastBar = 0;          // refresh the clock/WiFi bar once a second
   if (millis() - lastBar >= 1000) { lastBar = millis(); drawTopBar(); }
